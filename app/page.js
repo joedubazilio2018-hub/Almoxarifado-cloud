@@ -193,11 +193,14 @@ export default function InventoryApp() {
   ───────────────────────────────────────────── */
   const handleLogin = (e) => {
     e.preventDefault();
-    if (email && password) {
+    if (email === 'jo.edubazilio2018@gmail.com' && password === 'Art2023') {
       setIsLoggedIn(true);
       lsSet('inv_logged', true);
+    } else {
+      alert('E-mail ou senha incorretos!');
     }
   };
+
 
   const handleLogout = () => {
     setIsLoggedIn(false);
