@@ -3,12 +3,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 /* ─────────────────────────────────────────────
-   INITIAL SEED DATA
+   SEED DATA
 ───────────────────────────────────────────── */
 const SEED_ITEMS = [
-  { id: '1001', name: 'Luva de Nitrilo M', location: 'Prateleira A1', unit: 'Cx',   minStock: 10, maxStock: 50 },
-  { id: '1002', name: 'Fita Isolante 20m',  location: 'Gaveta B3',    unit: 'Un',   minStock: 5,  maxStock: 30 },
-  { id: '1003', name: 'Detergente Industrial', location: 'Palete C2', unit: 'Galo', minStock: 15, maxStock: 40 },
+  { id: '1001', name: 'Luva de Nitrilo M',    location: 'Prateleira A1', unit: 'Cx',   minStock: 10, maxStock: 50 },
+  { id: '1002', name: 'Fita Isolante 20m',    location: 'Gaveta B3',    unit: 'Un',   minStock: 5,  maxStock: 30 },
+  { id: '1003', name: 'Detergente Industrial', location: 'Palete C2',   unit: 'Galo', minStock: 15, maxStock: 40 },
 ];
 const SEED_INBOUND  = [
   { id: 'IN-001', itemId: '1001', qty: 20, date: '2026-06-01', sc: 'SC-12345' },
@@ -33,6 +33,12 @@ function lsSet(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function fmtDate(d) {
+  if (!d) return '—';
+  const [y, m, day] = d.split('-');
+  return `${day}/${m}/${y}`;
+}
+
 /* ─────────────────────────────────────────────
    TOAST
 ───────────────────────────────────────────── */
@@ -49,21 +55,16 @@ function Toast({ toast }) {
 
 /* ─────────────────────────────────────────────
    ITEM SEARCH SELECT
-   Dropdown com campo de busca por código ou nome
 ───────────────────────────────────────────── */
 function ItemSearchSelect({ items, value, onChange, getQty, showStock = false, ringColor = 'blue' }) {
-  const [query, setQuery]       = useState('');
-  const [open, setOpen]         = useState(false);
-  const wrapRef                 = useRef(null);
-
-  const selected = items.find(i => i.id === value);
-
-  const filtered = items.filter(i =>
-    i.name.toLowerCase().includes(query.toLowerCase()) ||
-    i.id.includes(query)
+  const [query, setQuery] = useState('');
+  const [open, setOpen]   = useState(false);
+  const wrapRef           = useRef(null);
+  const selected          = items.find(i => i.id === value);
+  const filtered          = items.filter(i =>
+    i.name.toLowerCase().includes(query.toLowerCase()) || i.id.includes(query)
   );
 
-  // Fecha ao clicar fora
   useEffect(() => {
     function handler(e) {
       if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
@@ -72,66 +73,39 @@ function ItemSearchSelect({ items, value, onChange, getQty, showStock = false, r
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const select = (item) => {
-    onChange(item.id);
-    setQuery('');
-    setOpen(false);
-  };
-
   const ringMap = { blue: 'focus:ring-blue-400', emerald: 'focus:ring-emerald-400', rose: 'focus:ring-rose-400' };
 
   return (
     <div ref={wrapRef} className="relative">
-      {/* Display button */}
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className={`w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-left flex justify-between items-center focus:outline-none focus:ring-2 ${ringMap[ringColor]} transition`}
-      >
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className={`w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-left flex justify-between items-center focus:outline-none focus:ring-2 ${ringMap[ringColor]} transition`}>
         <span className={selected ? 'text-slate-800' : 'text-slate-400'}>
-          {selected
-            ? `[${selected.id}] ${selected.name}${showStock ? ` — disponível: ${getQty(selected.id)} ${selected.unit}` : ''}`
-            : '— Escolha um item —'}
+          {selected ? `[${selected.id}] ${selected.name}${showStock ? ` — disponível: ${getQty(selected.id)} ${selected.unit}` : ''}` : '— Escolha um item —'}
         </span>
         <span className="text-slate-400 text-xs ml-2">{open ? '▲' : '▼'}</span>
       </button>
-
-      {/* Dropdown */}
       {open && (
         <div className="absolute z-40 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
-          {/* Search input */}
           <div className="p-2 border-b border-slate-100">
-            <input
-              autoFocus
-              type="text"
-              placeholder="🔍 Buscar por código ou nome..."
-              value={query}
+            <input autoFocus type="text" placeholder="🔍 Buscar por código ou nome..." value={query}
               onChange={e => setQuery(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
           </div>
-
-          {/* Results */}
           <ul className="max-h-52 overflow-y-auto divide-y divide-slate-50">
             {filtered.length === 0 ? (
               <li className="px-4 py-3 text-sm text-slate-400 text-center">Nenhum item encontrado.</li>
             ) : filtered.map(item => {
               const stock = getQty ? getQty(item.id) : null;
               return (
-                <li
-                  key={item.id}
-                  onClick={() => select(item)}
-                  className={`px-4 py-2.5 text-sm cursor-pointer hover:bg-slate-50 transition flex justify-between items-center ${value === item.id ? 'bg-blue-50' : ''}`}
-                >
+                <li key={item.id} onClick={() => { onChange(item.id); setQuery(''); setOpen(false); }}
+                  className={`px-4 py-2.5 text-sm cursor-pointer hover:bg-slate-50 transition flex justify-between items-center ${value === item.id ? 'bg-blue-50' : ''}`}>
                   <div>
                     <span className="font-mono text-[11px] text-slate-400 font-bold">[{item.id}]</span>
                     <span className="ml-2 font-medium text-slate-800">{item.name}</span>
                     <span className="ml-2 text-[11px] text-slate-400">{item.location}</span>
                   </div>
                   {showStock && stock !== null && (
-                    <span className={`text-xs font-bold ml-3 shrink-0 ${stock <= 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                      {stock} {item.unit}
-                    </span>
+                    <span className={`text-xs font-bold ml-3 shrink-0 ${stock <= 0 ? 'text-red-500' : 'text-emerald-600'}`}>{stock} {item.unit}</span>
                   )}
                 </li>
               );
@@ -140,6 +114,96 @@ function ItemSearchSelect({ items, value, onChange, getQty, showStock = false, r
         </div>
       )}
     </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   SC PANEL — painel de SC dentro do card Kanban
+───────────────────────────────────────────── */
+function ScPanel({ itemId, scMap, onSave, onClear }) {
+  const sc = scMap[itemId];
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ sc: '', dateSc: today(), dateEta: '' });
+
+  const openEdit = () => {
+    setForm(sc ? { sc: sc.sc, dateSc: sc.dateSc, dateEta: sc.dateEta } : { sc: '', dateSc: today(), dateEta: '' });
+    setEditing(true);
+  };
+
+  const save = () => {
+    if (!form.sc) return;
+    onSave(itemId, form);
+    setEditing(false);
+  };
+
+  /* SC já registrada */
+  if (sc && !editing) {
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <span className="text-blue-600 text-sm">🛒</span>
+            <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">SC Registrada</span>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={openEdit} className="text-[11px] text-blue-500 hover:text-blue-700 font-semibold underline">Editar</button>
+            <button onClick={() => onClear(itemId)} className="text-[11px] text-slate-400 hover:text-red-500 font-semibold underline">Remover</button>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-[11px]">
+          <div>
+            <p className="text-blue-400 font-medium">Nº SC</p>
+            <p className="font-bold text-blue-800 font-mono">{sc.sc}</p>
+          </div>
+          <div>
+            <p className="text-blue-400 font-medium">Data SC</p>
+            <p className="font-bold text-blue-800">{fmtDate(sc.dateSc)}</p>
+          </div>
+          <div>
+            <p className="text-blue-400 font-medium">Previsão</p>
+            <p className="font-bold text-blue-800">{sc.dateEta ? fmtDate(sc.dateEta) : '—'}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* Formulário de cadastro/edição */
+  if (editing) {
+    return (
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col gap-3">
+        <p className="text-xs font-bold text-blue-700 uppercase tracking-wide">📝 Registrar SC de Compra</p>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-3 sm:col-span-1">
+            <label className="block text-[10px] font-bold text-blue-500 uppercase mb-1">Nº da SC</label>
+            <input type="text" placeholder="SC-2026-99" value={form.sc} onChange={e => setForm({ ...form, sc: e.target.value })}
+              className="w-full px-2.5 py-2 bg-white border border-blue-200 rounded-lg text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-blue-500 uppercase mb-1">Data SC</label>
+            <input type="date" value={form.dateSc} onChange={e => setForm({ ...form, dateSc: e.target.value })}
+              className="w-full px-2.5 py-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold text-blue-500 uppercase mb-1">Previsão</label>
+            <input type="date" value={form.dateEta} onChange={e => setForm({ ...form, dateEta: e.target.value })}
+              className="w-full px-2.5 py-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={save} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg transition">Salvar SC</button>
+          <button onClick={() => setEditing(false)} className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 border border-slate-200 rounded-lg bg-white transition">Cancelar</button>
+        </div>
+      </div>
+    );
+  }
+
+  /* Botão para abrir */
+  return (
+    <button onClick={openEdit}
+      className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-dashed border-slate-300 text-slate-400 hover:border-blue-400 hover:text-blue-500 hover:bg-blue-50 transition text-xs font-semibold">
+      <span>🛒</span> Registrar SC de Compra
+    </button>
   );
 }
 
@@ -160,10 +224,8 @@ function Field({ label, accent, children }) {
 function Input({ ringColor = 'blue', mono, ...props }) {
   const ringMap = { blue: 'focus:ring-blue-400', emerald: 'focus:ring-emerald-400', rose: 'focus:ring-rose-400', amber: 'focus:ring-amber-400' };
   return (
-    <input
-      {...props}
-      className={`w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 ${ringMap[ringColor] || ringMap.blue} focus:border-transparent transition ${mono ? 'font-mono' : ''} ${props.className || ''}`}
-    />
+    <input {...props}
+      className={`w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 ${ringMap[ringColor] || ringMap.blue} focus:border-transparent transition ${mono ? 'font-mono' : ''} ${props.className || ''}`} />
   );
 }
 
@@ -202,6 +264,8 @@ export default function InventoryApp() {
   const [items,       setItems]       = useState(SEED_ITEMS);
   const [inboundLog,  setInboundLog]  = useState(SEED_INBOUND);
   const [outboundLog, setOutboundLog] = useState(SEED_OUTBOUND);
+  // scMap: { [itemId]: { sc, dateSc, dateEta } }
+  const [scMap, setScMap] = useState({});
 
   const [newItem,     setNewItem]     = useState({ id: '', name: '', location: '', unit: 'Un', minStock: '', maxStock: '' });
   const [newInbound,  setNewInbound]  = useState({ itemId: '', qty: '', date: today(), sc: '' });
@@ -212,6 +276,7 @@ export default function InventoryApp() {
   useEffect(() => {
     const si = ls('inv_items', null), ib = ls('inv_inbound', null), ob = ls('inv_outbound', null);
     if (si) setItems(si); if (ib) setInboundLog(ib); if (ob) setOutboundLog(ob);
+    const sm = ls('inv_scmap', null); if (sm) setScMap(sm);
     if (ls('inv_logged', false)) setIsLoggedIn(true);
   }, []);
 
@@ -225,6 +290,21 @@ export default function InventoryApp() {
     lsSet('inv_items', i); lsSet('inv_inbound', ib); lsSet('inv_outbound', ob);
   }, []);
 
+  const saveSc = useCallback((itemId, data) => {
+    const updated = { ...scMap, [itemId]: data };
+    setScMap(updated);
+    lsSet('inv_scmap', updated);
+    showToast('SC registrada com sucesso!');
+  }, [scMap, showToast]);
+
+  const clearSc = useCallback((itemId) => {
+    const updated = { ...scMap };
+    delete updated[itemId];
+    setScMap(updated);
+    lsSet('inv_scmap', updated);
+    showToast('SC removida.', 'warning');
+  }, [scMap, showToast]);
+
   const getQty = useCallback((itemId) => {
     const totalIn  = inboundLog.filter(r => r.itemId === itemId).reduce((s, r) => s + Number(r.qty), 0);
     const totalOut = outboundLog.filter(r => r.itemId === itemId).reduce((s, r) => s + Number(r.qty), 0);
@@ -232,23 +312,20 @@ export default function InventoryApp() {
   }, [inboundLog, outboundLog]);
 
   const getKanban = useCallback((itemId) => {
-    const qty = getQty(itemId);
+    const qty  = getQty(itemId);
     const item = items.find(i => i.id === itemId);
     if (!item) return { label: 'Ideal', status: 'healthy' };
     if (qty < Number(item.minStock))        return { label: 'CRÍTICO', status: 'danger'  };
     if (qty <= Number(item.minStock) * 1.3) return { label: 'ATENÇÃO', status: 'warning' };
-    return                                         { label: 'Ideal',    status: 'healthy' };
+    return                                         { label: 'Ideal',   status: 'healthy' };
   }, [items, getQty]);
 
-  /* ── HANDLERS ── */
+  /* HANDLERS */
   const handleLogin = (e) => {
     e.preventDefault();
     if (email === 'jo.edubazilio2018@gmail.com' && password === 'Art@2023') {
-      setIsLoggedIn(true);
-      lsSet('inv_logged', true);
-    } else {
-      showToast('E-mail ou senha incorretos!', 'error');
-    }
+      setIsLoggedIn(true); lsSet('inv_logged', true);
+    } else { showToast('E-mail ou senha incorretos!', 'error'); }
   };
 
   const handleLogout = () => { setIsLoggedIn(false); lsSet('inv_logged', false); };
@@ -257,10 +334,9 @@ export default function InventoryApp() {
     e.preventDefault();
     if (!newItem.id || !newItem.name) return showToast('Código e Nome são obrigatórios.', 'error');
     if (items.some(i => i.id === newItem.id)) return showToast('Este código já está cadastrado.', 'error');
-    const updated = [...items, { ...newItem, minStock: Number(newItem.minStock), maxStock: Number(newItem.maxStock) }];
-    persist(updated, inboundLog, outboundLog);
+    persist([...items, { ...newItem, minStock: Number(newItem.minStock), maxStock: Number(newItem.maxStock) }], inboundLog, outboundLog);
     setNewItem({ id: '', name: '', location: '', unit: 'Un', minStock: '', maxStock: '' });
-    showToast(`"${newItem.name}" cadastrado com sucesso!`);
+    showToast(`"${newItem.name}" cadastrado!`);
     setActiveTab('stock');
   };
 
@@ -268,6 +344,8 @@ export default function InventoryApp() {
     e.preventDefault();
     if (!newInbound.itemId || !newInbound.qty) return showToast('Selecione o item e a quantidade.', 'error');
     persist(items, [...inboundLog, { ...newInbound, qty: Number(newInbound.qty), id: `IN-${Date.now()}` }], outboundLog);
+    // Ao dar entrada, limpa a SC pendente do item
+    clearSc(newInbound.itemId);
     const name = items.find(i => i.id === newInbound.itemId)?.name;
     setNewInbound({ itemId: '', qty: '', date: today(), sc: '' });
     showToast(`Entrada de "${name}" registrada!`);
@@ -286,12 +364,12 @@ export default function InventoryApp() {
     setActiveTab('stock');
   };
 
-  const filteredItems  = items.filter(i =>
+  const filteredItems = items.filter(i =>
     i.name.toLowerCase().includes(searchQuery.toLowerCase()) || i.id.includes(searchQuery)
   );
-  const criticalItems  = items.filter(i => ['danger', 'warning'].includes(getKanban(i.id).status));
+  const criticalItems = items.filter(i => ['danger', 'warning'].includes(getKanban(i.id).status));
 
-  /* ── LOGIN ── */
+  /* LOGIN */
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -307,14 +385,14 @@ export default function InventoryApp() {
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-widest">E-mail</label>
                 <input type="email" required placeholder="seu@email.com" value={email} onChange={e => setEmail(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" />
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-widest">Senha</label>
                 <input type="password" required placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition" />
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
               </div>
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-white font-bold py-3 rounded-xl transition-all text-sm tracking-wide shadow-lg shadow-blue-900/40 mt-2">
+              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition text-sm shadow-lg shadow-blue-900/40 mt-2">
                 Entrar no Sistema
               </button>
             </form>
@@ -324,13 +402,13 @@ export default function InventoryApp() {
     );
   }
 
-  /* ── MAIN APP ── */
+  /* MAIN APP */
   const navItems = [
-    { id: 'stock',    icon: '📦', label: 'Estoque',                   activeColor: 'bg-blue-600'    },
+    { id: 'stock',    icon: '📦', label: 'Estoque',                        activeColor: 'bg-blue-600'    },
     { id: 'kanban',   icon: '⚠️', label: `Kanban (${criticalItems.length})`, activeColor: 'bg-amber-600' },
-    { id: 'register', icon: '➕', label: 'Cadastrar',                  activeColor: 'bg-slate-600'   },
-    { id: 'inbound',  icon: '📥', label: 'Entrada',                   activeColor: 'bg-emerald-700' },
-    { id: 'outbound', icon: '📤', label: 'Saída',                     activeColor: 'bg-rose-700'    },
+    { id: 'register', icon: '➕', label: 'Cadastrar',                       activeColor: 'bg-slate-600'   },
+    { id: 'inbound',  icon: '📥', label: 'Entrada',                        activeColor: 'bg-emerald-700' },
+    { id: 'outbound', icon: '📤', label: 'Saída',                          activeColor: 'bg-rose-700'    },
   ];
 
   return (
@@ -347,7 +425,7 @@ export default function InventoryApp() {
               <span className="text-[10px] text-emerald-400 font-semibold">● Online</span>
             </div>
           </div>
-          <button onClick={handleLogout} className="md:hidden text-xs text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 py-1 px-2.5 rounded-lg transition">Sair</button>
+          <button onClick={handleLogout} className="md:hidden text-xs text-slate-400 hover:text-white border border-slate-700 py-1 px-2.5 rounded-lg transition">Sair</button>
         </div>
         <nav className="flex flex-row md:flex-col p-2 gap-1 overflow-x-auto md:overflow-x-visible md:flex-1">
           {navItems.map(n => (
@@ -388,14 +466,16 @@ export default function InventoryApp() {
                         <th className="px-4 py-3 text-left hidden lg:table-cell">Localização</th>
                         <th className="px-4 py-3 text-center">Qtd.</th>
                         <th className="px-4 py-3 text-left">Kanban</th>
+                        <th className="px-4 py-3 text-left hidden md:table-cell">SC Pendente</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredItems.length === 0 ? (
-                        <tr><td colSpan="5" className="px-4 py-10 text-center text-slate-400">Nenhum item encontrado.</td></tr>
+                        <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-400">Nenhum item encontrado.</td></tr>
                       ) : filteredItems.map(item => {
                         const qty = getQty(item.id);
                         const ks  = getKanban(item.id);
+                        const sc  = scMap[item.id];
                         return (
                           <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                             <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500">{item.id}</td>
@@ -408,6 +488,15 @@ export default function InventoryApp() {
                               <span className="text-[11px] text-slate-400 ml-1">{item.unit}</span>
                             </td>
                             <td className="px-4 py-3"><StatusBadge status={ks.status} label={ks.label} /></td>
+                            <td className="px-4 py-3 hidden md:table-cell">
+                              {sc ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+                                  🛒 {sc.sc}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-slate-300">—</span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -423,7 +512,7 @@ export default function InventoryApp() {
             <div className="space-y-5">
               <div>
                 <h1 className="text-xl font-bold text-amber-700">Alertas Kanban</h1>
-                <p className="text-slate-400 text-xs mt-0.5">Itens que atingiram ou romperam o estoque mínimo</p>
+                <p className="text-slate-400 text-xs mt-0.5">Itens críticos · registre a SC de compra diretamente no card</p>
               </div>
               {criticalItems.length === 0 ? (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-10 text-center">
@@ -433,11 +522,13 @@ export default function InventoryApp() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {criticalItems.map(item => {
-                    const qty = getQty(item.id);
+                    const qty        = getQty(item.id);
                     const isCritical = qty < Number(item.minStock);
-                    const pct = Math.min(100, Math.max(0, (qty / Number(item.maxStock)) * 100));
+                    const pct        = Math.min(100, Math.max(0, (qty / Number(item.maxStock)) * 100));
                     return (
                       <div key={item.id} className={`bg-white rounded-2xl border p-5 shadow-sm flex flex-col gap-4 ${isCritical ? 'border-red-200 ring-1 ring-red-100' : 'border-amber-200 ring-1 ring-amber-100'}`}>
+
+                        {/* Header */}
                         <div className="flex justify-between items-start">
                           <div>
                             <span className="font-mono text-[10px] font-bold text-slate-400">CÓD {item.id}</span>
@@ -448,11 +539,15 @@ export default function InventoryApp() {
                             {isCritical ? '🔴 CRÍTICO' : '🟡 ATENÇÃO'}
                           </span>
                         </div>
+
+                        {/* Qty grid */}
                         <div className="grid grid-cols-3 text-center bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs">
                           <div><p className="text-slate-400">Mínimo</p><p className="font-bold text-slate-700 mt-0.5">{item.minStock}</p></div>
                           <div className="border-x border-slate-200"><p className="text-slate-400">Atual</p><p className={`font-bold text-lg mt-0.5 ${isCritical ? 'text-red-600' : 'text-amber-600'}`}>{qty}</p></div>
                           <div><p className="text-slate-400">Máximo</p><p className="font-bold text-slate-700 mt-0.5">{item.maxStock}</p></div>
                         </div>
+
+                        {/* Progress */}
                         <div>
                           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                             <div className={`h-full rounded-full transition-all ${isCritical ? 'bg-red-400' : 'bg-amber-400'}`} style={{ width: `${pct}%` }} />
@@ -462,6 +557,10 @@ export default function InventoryApp() {
                             <span>Repor: <strong className="text-slate-600">{Number(item.maxStock) - qty} {item.unit}</strong></span>
                           </div>
                         </div>
+
+                        {/* SC Panel */}
+                        <ScPanel itemId={item.id} scMap={scMap} onSave={saveSc} onClear={clearSc} />
+
                       </div>
                     );
                   })}
@@ -505,7 +604,7 @@ export default function InventoryApp() {
                   <Field label="Qtd. Mínima — Gatilho Kanban" accent="amber">
                     <input type="number" required min="0" placeholder="Ex: 10"
                       value={newItem.minStock} onChange={e => setNewItem({ ...newItem, minStock: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-white border border-amber-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent transition" />
+                      className="w-full px-3 py-2.5 bg-white border border-amber-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-400 transition" />
                   </Field>
                   <Field label="Qtd. Máxima (Meta)">
                     <Input type="number" required min="0" placeholder="Ex: 100"
@@ -526,14 +625,9 @@ export default function InventoryApp() {
               </div>
               <form onSubmit={handleInbound} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
                 <Field label="Selecionar Item">
-                  <ItemSearchSelect
-                    items={items}
-                    value={newInbound.itemId}
+                  <ItemSearchSelect items={items} value={newInbound.itemId}
                     onChange={v => setNewInbound({ ...newInbound, itemId: v })}
-                    getQty={getQty}
-                    showStock={false}
-                    ringColor="emerald"
-                  />
+                    getQty={getQty} showStock={false} ringColor="emerald" />
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Quantidade Recebida">
@@ -563,14 +657,9 @@ export default function InventoryApp() {
               </div>
               <form onSubmit={handleOutbound} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
                 <Field label="Selecionar Item">
-                  <ItemSearchSelect
-                    items={items}
-                    value={newOutbound.itemId}
+                  <ItemSearchSelect items={items} value={newOutbound.itemId}
                     onChange={v => setNewOutbound({ ...newOutbound, itemId: v })}
-                    getQty={getQty}
-                    showStock={true}
-                    ringColor="rose"
-                  />
+                    getQty={getQty} showStock={true} ringColor="rose" />
                 </Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Quantidade Retirada">
@@ -585,7 +674,7 @@ export default function InventoryApp() {
                 <Field label="Destino / Observações">
                   <textarea rows="3" placeholder="Ex: Entregue ao técnico João — manutenção máquina 02."
                     value={newOutbound.notes} onChange={e => setNewOutbound({ ...newOutbound, notes: e.target.value })}
-                    className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent transition resize-none" />
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-400 transition resize-none" />
                 </Field>
                 <SubmitBtn color="rose">Confirmar Baixa no Estoque</SubmitBtn>
               </form>
