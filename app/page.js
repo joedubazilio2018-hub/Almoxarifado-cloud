@@ -368,15 +368,88 @@ export default function InventoryApp() {
 };
    
   const handleRegister = (e) => {
-    e.preventDefault();
-    if (!newItem.id || !newItem.name) return showToast('Código e Nome são obrigatórios.', 'error');
-    if (items.some(i => i.id === newItem.id)) return showToast('Este código já está cadastrado.', 'error');
-    persist([...items, { ...newItem, minStock: Number(newItem.minStock), maxStock: Number(newItem.maxStock) }], inboundLog, outboundLog);
-    setNewItem({ id: '', name: '', location: '', unit: 'Un', minStock: '', maxStock: '' });
-    showToast(`"${newItem.name}" cadastrado!`);
-    setActiveTab('stock');
-  };
 
+  e.preventDefault();
+
+  if (!newItem.id || !newItem.name) {
+    return showToast(
+      'Código e Nome são obrigatórios.',
+      'error'
+    );
+  }
+
+  if (editingItem) {
+
+    const updatedItems = items.map(item =>
+      item.id === editingItem.id
+        ? {
+            ...newItem,
+            minStock: Number(newItem.minStock),
+            maxStock: Number(newItem.maxStock)
+          }
+        : item
+    );
+
+    persist(
+      updatedItems,
+      inboundLog,
+      outboundLog
+    );
+
+    setEditingItem(null);
+
+    setNewItem({
+      id: '',
+      name: '',
+      location: '',
+      application: '',
+      unit: 'Un',
+      minStock: '',
+      maxStock: ''
+    });
+
+    showToast('Item atualizado com sucesso!');
+
+    setActiveTab('stock');
+
+    return;
+  }
+
+  if (items.some(i => i.id === newItem.id)) {
+    return showToast(
+      'Este código já está cadastrado.',
+      'error'
+    );
+  }
+
+  persist(
+    [
+      ...items,
+      {
+        ...newItem,
+        minStock: Number(newItem.minStock),
+        maxStock: Number(newItem.maxStock)
+      }
+    ],
+    inboundLog,
+    outboundLog
+  );
+
+  setNewItem({
+    id: '',
+    name: '',
+    location: '',
+    application: '',
+    unit: 'Un',
+    minStock: '',
+    maxStock: ''
+  });
+
+  showToast(`"${newItem.name}" cadastrado!`);
+
+  setActiveTab('stock');
+};
+   
   const handleInbound = (e) => {
     e.preventDefault();
     if (!newInbound.itemId || !newInbound.qty) return showToast('Selecione o item e a quantidade.', 'error');
@@ -501,9 +574,11 @@ export default function InventoryApp() {
                         <th className="px-4 py-3 text-left">Código</th>
                         <th className="px-4 py-3 text-left">Item</th>
                         <th className="px-4 py-3 text-left hidden lg:table-cell">Localização</th>
+                        <th className="px-4 py-3 text-left"> Aplicação</th>
                         <th className="px-4 py-3 text-center">Qtd.</th>
                         <th className="px-4 py-3 text-left">Kanban</th>
                         <th className="px-4 py-3 text-left hidden md:table-cell">SC Pendente</th>
+                        <th className="px-4 py-3 text-center">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -514,30 +589,78 @@ export default function InventoryApp() {
                         const ks  = getKanban(item.id);
                         const sc  = scMap[item.id];
                         return (
-                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500">{item.id}</td>
-                            <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
-                            <td className="px-4 py-3 hidden lg:table-cell">
-                              <span className="bg-slate-100 border border-slate-200 text-slate-500 text-[11px] px-2 py-0.5 rounded-md font-mono">{item.location || '—'}</span>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="font-bold text-slate-900">{qty}</span>
-                              <span className="text-[11px] text-slate-400 ml-1">{item.unit}</span>
-                            </td>
-                            <td className="px-4 py-3"><StatusBadge status={ks.status} label={ks.label} /></td>
-                            <td className="px-4 py-3 hidden md:table-cell">
-                              {sc ? (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
-                                  🛒 {sc.sc}
-                                </span>
-                              ) : (
-                                <span className="text-[11px] text-slate-300">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
+  <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+
+    <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500">
+      {item.id}
+    </td>
+
+    <td className="px-4 py-3 font-semibold text-slate-900">
+      {item.name}
+    </td>
+
+    <td className="px-4 py-3 hidden lg:table-cell">
+      <span className="bg-slate-100 border border-slate-200 text-slate-500 text-[11px] px-2 py-0.5 rounded-md font-mono">
+        {item.location || '—'}
+      </span>
+    </td>
+
+    <td className="px-4 py-3 text-xs text-slate-600">
+      {item.application || '—'}
+    </td>
+
+    <td className="px-4 py-3 text-center">
+      <span className="font-bold text-slate-900">
+        {qty}
+      </span>
+      <span className="text-[11px] text-slate-400 ml-1">
+        {item.unit}
+      </span>
+    </td>
+
+    <td className="px-4 py-3">
+      <StatusBadge
+        status={ks.status}
+        label={ks.label}
+      />
+    </td>
+
+    <td className="px-4 py-3 hidden md:table-cell">
+      {sc ? (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full">
+          🛒 {sc.sc}
+        </span>
+      ) : (
+        <span className="text-[11px] text-slate-300">
+          —
+        </span>
+      )}
+    </td>
+
+    <td className="px-4 py-3">
+      <div className="flex gap-2">
+
+        <button
+          onClick={() => handleEditItem(item)}
+          className="px-2 py-1 bg-blue-500 text-white rounded text-xs"
+        >
+          Editar
+        </button>
+
+        <button
+          onClick={() => handleDeleteItem(item.id)}
+          className="px-2 py-1 bg-red-500 text-white rounded text-xs"
+        >
+          Excluir
+        </button>
+
+      </div>
+    </td>
+
+  </tr>
+);
                       })}
-                    </tbody>
+                    </tbody> 
                   </table>
                 </div>
               </div>
