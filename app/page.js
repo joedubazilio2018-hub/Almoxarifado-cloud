@@ -756,8 +756,7 @@ export default function InventoryApp() {
                   <Input type="text" required placeholder="Ex: Parafuso Sextavado M10"
                     value={newItem.name} onChange={e => setNewItem({ ...newItem, name: e.target.value })} />
                 </Field>
-                <Field label="Localização no Almoxarifado">
-             <Field label="Aplicação / Onde é usado">
+                <Field label="Aplicação / Onde é usado">
   <Input
     type="text"
     placeholder="Ex: Máquina Corte Laser, Produto XPTO, Linha 03"
@@ -766,6 +765,20 @@ export default function InventoryApp() {
       setNewItem({
         ...newItem,
         application: e.target.value
+      })
+    }
+  />
+</Field>
+
+<Field label="Localização no Almoxarifado">
+  <Input
+    type="text"
+    placeholder="Ex: Prateleira B, Setor 4"
+    value={newItem.location}
+    onChange={e =>
+      setNewItem({
+        ...newItem,
+        location: e.target.value
       })
     }
   />
