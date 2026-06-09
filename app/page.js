@@ -267,7 +267,8 @@ export default function InventoryApp() {
   // scMap: { [itemId]: { sc, dateSc, dateEta } }
   const [scMap, setScMap] = useState({});
 
-  const [newItem,     setNewItem]     = useState({ id: '', name: '', location: '', unit: 'Un', minStock: '', maxStock: '' });
+  const [newItem, setNewItem] = useState({
+  id: '', name: '', location: '', application: '',  unit: 'Un',  minStock: '',  maxStock: '' });
   const [newInbound,  setNewInbound]  = useState({ itemId: '', qty: '', date: today(), sc: '' });
   const [newOutbound, setNewOutbound] = useState({ itemId: '', qty: '', date: today(), notes: '' });
   const [searchQuery, setSearchQuery] = useState('');
@@ -597,6 +598,19 @@ export default function InventoryApp() {
                     value={newItem.name} onChange={e => setNewItem({ ...newItem, name: e.target.value })} />
                 </Field>
                 <Field label="Localização no Almoxarifado">
+             <Field label="Aplicação / Onde é usado">
+  <Input
+    type="text"
+    placeholder="Ex: Máquina Corte Laser, Produto XPTO, Linha 03"
+    value={newItem.application}
+    onChange={e =>
+      setNewItem({
+        ...newItem,
+        application: e.target.value
+      })
+    }
+  />
+</Field>
                   <Input type="text" placeholder="Ex: Prateleira B, Setor 4"
                     value={newItem.location} onChange={e => setNewItem({ ...newItem, location: e.target.value })} />
                 </Field>
