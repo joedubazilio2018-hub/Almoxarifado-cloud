@@ -273,6 +273,7 @@ export default function InventoryApp() {
   const [newOutbound, setNewOutbound] = useState({ itemId: '', qty: '', date: today(), notes: '' });
   const [searchQuery, setSearchQuery] = useState('');
   const [toast,       setToast]       = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
 
   useEffect(() => {
     const si = ls('inv_items', null), ib = ls('inv_inbound', null), ob = ls('inv_outbound', null);
@@ -330,7 +331,42 @@ export default function InventoryApp() {
   };
 
   const handleLogout = () => { setIsLoggedIn(false); lsSet('inv_logged', false); };
+  
+  const handleDeleteItem = (itemId) => {
 
+  if (!confirm('Deseja realmente excluir este item?')) {
+    return;
+  }
+
+  const updatedItems =
+    items.filter(item => item.id !== itemId);
+
+  persist(
+    updatedItems,
+    inboundLog,
+    outboundLog
+  );
+
+  showToast('Item removido com sucesso!', 'warning');
+};
+
+  const handleEditItem = (item) => {
+
+  setEditingItem(item);
+
+  setNewItem({
+    id: item.id,
+    name: item.name,
+    location: item.location || '',
+    application: item.application || '',
+    unit: item.unit,
+    minStock: item.minStock,
+    maxStock: item.maxStock
+  });
+
+  setActiveTab('register');
+};
+   
   const handleRegister = (e) => {
     e.preventDefault();
     if (!newItem.id || !newItem.name) return showToast('Código e Nome são obrigatórios.', 'error');
