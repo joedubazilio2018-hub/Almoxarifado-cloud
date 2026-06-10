@@ -382,7 +382,6 @@ export default function InventoryApp() {
         showToast(`"${newItem.name}" cadastrado!`);
       }
       setNewItem({ id: '', name: '', location: '', application: '', unit: 'Un', minStock: '', maxStock: '' });
-      setActiveTab('stock');
     } catch { showToast('Erro ao salvar item.', 'error'); }
     finally { setSaving(false); }
   };
@@ -414,7 +413,6 @@ export default function InventoryApp() {
       const name = items.find(i => i.id === newInbound.itemId)?.name;
       setNewInbound({ itemId: '', qty: '', date: today(), sc: '' });
       showToast(`Entrada de "${name}" registrada!`);
-      setActiveTab('stock');
     } catch { showToast('Erro ao registrar entrada.', 'error'); }
     finally { setSaving(false); }
   };
@@ -432,7 +430,6 @@ export default function InventoryApp() {
       const name = items.find(i => i.id === newOutbound.itemId)?.name;
       setNewOutbound({ itemId: '', qty: '', date: today(), notes: '' });
       showToast(`Saída de "${name}" confirmada!`);
-      setActiveTab('stock');
     } catch { showToast('Erro ao registrar saída.', 'error'); }
     finally { setSaving(false); }
   };
