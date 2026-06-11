@@ -589,7 +589,21 @@ export default function InventoryApp() {
                             return (
                               <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                                 <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500">{item.id}</td>
-                                <td className="px-4 py-3 font-semibold text-slate-900">{item.name}</td>
+                                <td className="px-4 py-3">
+             <button
+             onClick={() =>
+      setExpandedItem(
+        expandedItem === item.id ? null : item.id
+      )
+    }
+    className="font-semibold text-slate-900 hover:text-blue-600 transition flex items-center gap-2"
+  >
+    {item.name}
+    <span className="text-xs text-slate-400">
+      {expandedItem === item.id ? '▲' : '▼'}
+    </span>
+  </button>
+</td>
                                 <td className="px-4 py-3 hidden lg:table-cell">
                                   <span className="bg-slate-100 border border-slate-200 text-slate-500 text-[11px] px-2 py-0.5 rounded-md font-mono">{item.location || '—'}</span>
                                 </td>
