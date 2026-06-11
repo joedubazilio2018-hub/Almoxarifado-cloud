@@ -19,9 +19,10 @@ async function db(path, opts = {}) {
     ...opts,
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err);
-  }
+  const errText = await res.text();
+  console.error("❌ SUPABASE RAW ERROR:", errText);
+  throw new Error(errText);
+}
   const data = await res.text();
 console.log("SUPABASE RESPONSE:", data);
 return data ? JSON.parse(data) : [];
