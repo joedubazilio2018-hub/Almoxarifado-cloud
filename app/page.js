@@ -587,7 +587,7 @@ export default function InventoryApp() {
                             const ks  = getKanban(item.id);
                             const sc  = scMap[item.id];
                             return (
-                              <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                              <React.Fragment key={item.id}> className="hover:bg-slate-50 transition-colors">
                                 <td className="px-4 py-3 font-mono text-xs font-bold text-slate-500">{item.id}</td>
                                 <td className="px-4 py-3">
              <button
