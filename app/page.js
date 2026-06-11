@@ -22,8 +22,9 @@ async function db(path, opts = {}) {
     const err = await res.text();
     throw new Error(err);
   }
-  const text = await res.text();
-  return text ? JSON.parse(text) : [];
+  const data = await res.text();
+console.log("SUPABASE RESPONSE:", data);
+return data ? JSON.parse(data) : [];
 }
 
 // Helpers por tabela
