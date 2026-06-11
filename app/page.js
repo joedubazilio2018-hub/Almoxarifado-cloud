@@ -280,6 +280,7 @@ export default function InventoryApp() {
   const [toast,       setToast]       = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [saving,      setSaving]      = useState(false);
+  const [expandedItem, setExpandedItem] = useState(null);
 
   /* ── Toast ── */
   const showToast = useCallback((msg, type = 'success') => {
