@@ -334,6 +334,28 @@ export default function InventoryApp() {
     return                                         { label: 'Ideal',   status: 'healthy' };
   }, [items, getQty]);
 
+   const getLastMovements = useCallback((itemId) => {
+  const inbound = inboundLog
+    .filter(r => r.itemId === itemId)
+    .map(r => ({
+      type: 'Entrada',
+      qty: r.qty,
+      date: r.date,
+    }));
+
+  const outbound = outboundLog
+    .filter(r => r.itemId === itemId)
+    .map(r => ({
+      type: 'Saída',
+      qty: r.qty,
+      date: r.date,
+    }));
+
+  return [...inbound, ...outbound]
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 5);
+}, [inboundLog, outboundLog]);
+
   /* ── SC ── */
   const saveSc = useCallback(async (itemId, data) => {
     try {
