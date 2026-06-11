@@ -426,20 +426,42 @@ export default function InventoryApp() {
   };
 
   const handleInbound = async (e) => {
-    e.preventDefault();
-    if (!newInbound.itemId || !newInbound.qty) return showToast('Selecione o item e a quantidade.', 'error');
-    setSaving(true);
-    try {
-      const row = { id: `IN-${Date.now()}`, item_id: newInbound.itemId, qty: Number(newInbound.qty), date: newInbound.date, sc: newInbound.sc };
-      await api.insertInbound(row);
-      setInboundLog(prev => [...prev, rowToInbound(row)]);
-      await clearSc(newInbound.itemId);
-      const name = items.find(i => i.id === newInbound.itemId)?.name;
-      setNewInbound({ itemId: '', qty: '', date: today(), sc: '' });
-      showToast(`Entrada de "${name}" registrada!`);
-    } catch { showToast('Erro ao registrar entrada.', 'error'); }
-    finally { setSaving(false); }
-  };
+  e.preventDefault();
+  if (!newInbound.itemId || !newInbound.qty) return showToast('Selecione o item e a quantidade.', 'error');
+  setSaving(true);
+
+  try {
+    const row = {
+      id: `IN-${Date.now()}`,
+      item_id: newInbound.itemId,
+      qty: Number(newInbound.qty),
+      date: newInbound.date,
+      sc: newInbound.sc
+    };
+
+    console.log("📦 ENVIANDO PARA SUPABASE:", row);
+
+    const result = await api.insertInbound(row);
+
+    console.log("✅ INSERT RESULT:", result);
+
+    setInboundLog(prev => [...prev, rowToInbound(row)]);
+
+    await clearSc(newInbound.itemId);
+
+    const name = items.find(i => i.id === newInbound.itemId)?.name;
+
+    setNewInbound({ itemId: '', qty: '', date: today(), sc: '' });
+
+    showToast(`Entrada de "${name}" registrada!`);
+
+  } catch (err) {
+    console.error("❌ ERRO INSERT INBOUND:", err);
+    showToast('Erro ao registrar entrada.', 'error');
+  } finally {
+    setSaving(false);
+  }
+};
 
   const handleOutbound = async (e) => {
     e.preventDefault();
