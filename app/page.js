@@ -628,6 +628,54 @@ export default function InventoryApp() {
                                   </div>
                                 </td>
                               </tr>
+{expandedItem === item.id && (
+  <tr>
+    <td colSpan="8" className="bg-slate-50 px-6 py-4">
+      <div className="space-y-2">
+        <p className="text-xs font-bold text-slate-500 uppercase">
+          Últimas movimentações
+        </p>
+
+        {getLastMovements(item.id).length === 0 ? (
+          <p className="text-xs text-slate-400">
+            Nenhuma movimentação encontrada.
+          </p>
+        ) : (
+          getLastMovements(item.id).map((mov, idx) => (
+            <div
+              key={idx}
+              className="flex justify-between items-center text-sm bg-white border border-slate-200 rounded-lg px-3 py-2"
+            >
+              <div className="flex items-center gap-2">
+                <span>
+                  {mov.type === 'Entrada' ? '📥' : '📤'}
+                </span>
+
+                <span
+                  className={
+                    mov.type === 'Entrada'
+                      ? 'text-emerald-600 font-medium'
+                      : 'text-rose-600 font-medium'
+                  }
+                >
+                  {mov.type}
+                </span>
+
+                <span className="text-slate-500">
+                  {mov.qty} {item.unit}
+                </span>
+              </div>
+
+              <span className="text-xs text-slate-400">
+                {fmtDate(mov.date)}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </td>
+  </tr>
+)}
                             );
                           })}
                         </tbody>
