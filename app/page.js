@@ -336,13 +336,14 @@ export default function InventoryApp() {
     return                                         { label: 'Ideal',   status: 'healthy' };
   }, [items, getQty]);
 
-   const getLastMovements = useCallback((itemId) => {
+const getLastMovements = useCallback((itemId) => {
   const inbound = inboundLog
     .filter(r => r.itemId === itemId)
     .map(r => ({
       type: 'Entrada',
       qty: r.qty,
       date: r.date,
+      sc: r.sc,
     }));
 
   const outbound = outboundLog
@@ -351,13 +352,13 @@ export default function InventoryApp() {
       type: 'Saída',
       qty: r.qty,
       date: r.date,
+      notes: r.notes,
     }));
 
   return [...inbound, ...outbound]
     .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, 5);
 }, [inboundLog, outboundLog]);
-
   /* ── SC ── */
   const saveSc = useCallback(async (itemId, data) => {
     try {
@@ -665,34 +666,48 @@ export default function InventoryApp() {
             Nenhuma movimentação encontrada.
           </p>
         ) : (
-          getLastMovements(item.id).map((mov, idx) => (
+getLastMovements(item.id).map((mov, idx) => (
             <div
               key={idx}
-              className="flex justify-between items-center text-sm bg-white border border-slate-200 rounded-lg px-3 py-2"
+              className="flex flex-col gap-1 text-sm bg-white border border-slate-200 rounded-lg px-3 py-2"
             >
-              <div className="flex items-center gap-2">
-                <span>
-                  {mov.type === 'Entrada' ? '📥' : '📤'}
-                </span>
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <span>
+                    {mov.type === 'Entrada' ? '📥' : '📤'}
+                  </span>
 
-                <span
-                  className={
-                    mov.type === 'Entrada'
-                      ? 'text-emerald-600 font-medium'
-                      : 'text-rose-600 font-medium'
-                  }
-                >
-                  {mov.type}
-                </span>
+                  <span
+                    className={
+                      mov.type === 'Entrada'
+                        ? 'text-emerald-600 font-medium'
+                        : 'text-rose-600 font-medium'
+                    }
+                  >
+                    {mov.type}
+                  </span>
 
-                <span className="text-slate-500">
-                  {mov.qty} {item.unit}
+                  <span className="text-slate-500">
+                    {mov.qty} {item.unit}
+                  </span>
+                </div>
+
+                <span className="text-xs text-slate-400">
+                  {fmtDate(mov.date)}
                 </span>
               </div>
 
-              <span className="text-xs text-slate-400">
-                {fmtDate(mov.date)}
-              </span>
+              {mov.type === 'Entrada' && mov.sc && (
+                <span className="text-[11px] text-blue-600 font-mono pl-6">
+                  🛒 SC: {mov.sc}
+                </span>
+              )}
+
+              {mov.type === 'Saída' && mov.notes && (
+                <span className="text-[11px] text-slate-500 italic pl-6">
+                  📝 {mov.notes}
+                </span>
+              )}
             </div>
           ))
         )}
