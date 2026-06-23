@@ -278,6 +278,7 @@ export default function InventoryApp() {
   const [newItem, setNewItem] = useState({ id: '', name: '', location: '', application: '', unit: 'Un', minStock: '', maxStock: '' });
   const [newInbound,  setNewInbound]  = useState({ itemId: '', qty: '', date: today(), sc: '' });
   const [newOutbound, setNewOutbound] = useState({ itemId: '', qty: '', date: today(), notes: '' });
+  const [newSc, setNewSc] = useState({ itemId: '', sc: '', dateSc: today(), dateEta: '' });
   const [searchQuery, setSearchQuery] = useState('');
   const [toast,       setToast]       = useState(null);
   const [editingItem, setEditingItem] = useState(null);
@@ -495,6 +496,22 @@ const getLastMovements = useCallback((itemId) => {
     i.name.toLowerCase().includes(searchQuery.toLowerCase()) || i.id.includes(searchQuery)
   );
   const criticalItems = items.filter(i => ['danger', 'warning'].includes(getKanban(i.id).status));
+
+  const handleRegisterSc = async (e) => {
+  e.preventDefault();
+  if (!newSc.itemId || !newSc.sc) return showToast('Selecione o item e informe o número da SC.', 'error');
+  setSaving(true);
+  try {
+    await saveSc(newSc.itemId, { sc: newSc.sc, dateSc: newSc.dateSc, dateEta: newSc.dateEta });
+    const name = items.find(i => i.id === newSc.itemId)?.name;
+    setNewSc({ itemId: '', sc: '', dateSc: today(), dateEta: '' });
+    showToast(`SC registrada para "${name}"!`);
+  } catch {
+    showToast('Erro ao registrar SC.', 'error');
+  } finally {
+    setSaving(false);
+  }
+};
 
   /* ── LOGIN ── */
   if (!isLoggedIn) {
@@ -797,6 +814,94 @@ getLastMovements(item.id).map((mov, idx) => (
                 </div>
               )}
 
+{activeTab === 'sc' && (
+  <div className="space-y-5">
+    <div>
+      <h1 className="text-xl font-bold text-purple-800">SC de Compra</h1>
+      <p className="text-slate-400 text-xs mt-0.5">Registre solicitações de compra e acompanhe as previsões de chegada</p>
+    </div>
+
+    {/* Formulário */}
+    <div className="max-w-lg">
+      <form onSubmit={handleRegisterSc} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <Field label="Selecionar Item">
+          <ItemSearchSelect items={items} value={newSc.itemId}
+            onChange={v => setNewSc({ ...newSc, itemId: v })}
+            getQty={getQty} showStock={true} ringColor="blue" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Nº da SC">
+            <Input ringColor="blue" mono type="text" required placeholder="SC-2026-99"
+              value={newSc.sc} onChange={e => setNewSc({ ...newSc, sc: e.target.value })} />
+          </Field>
+          <Field label="Data da SC">
+            <Input ringColor="blue" type="date" required
+              value={newSc.dateSc} onChange={e => setNewSc({ ...newSc, dateSc: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Previsão de Chegada">
+          <Input ringColor="blue" type="date"
+            value={newSc.dateEta} onChange={e => setNewSc({ ...newSc, dateEta: e.target.value })} />
+        </Field>
+        <SubmitBtn color="slate" disabled={saving}>{saving ? 'Salvando...' : '🛒 Registrar SC'}</SubmitBtn>
+      </form>
+    </div>
+
+    {/* Lista de SCs ativas */}
+    <div>
+      <h2 className="text-sm font-bold text-slate-600 mb-3">SCs Ativas ({Object.keys(scMap).length})</h2>
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                <th className="px-4 py-3 text-left">Item</th>
+                <th className="px-4 py-3 text-left">Nº SC</th>
+                <th className="px-4 py-3 text-left">Data SC</th>
+                <th className="px-4 py-3 text-left">Previsão</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-center">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {Object.keys(scMap).length === 0 ? (
+                <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-400">Nenhuma SC ativa.</td></tr>
+              ) : Object.entries(scMap).map(([itemId, sc]) => {
+                const item = items.find(i => i.id === itemId);
+                const status = getScStatus(itemId);
+                return (
+                  <tr key={itemId} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
+                      <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-blue-700">{sc.sc}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{fmtDate(sc.dateSc)}</td>
+                    <td className="px-4 py-3 text-xs text-slate-600">{sc.dateEta ? fmtDate(sc.dateEta) : '—'}</td>
+                    <td className="px-4 py-3">
+                      {status === 'chega_hoje' && (
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">📦 Chega hoje</span>
+                      )}
+                      {status === 'atrasada' && (
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">⏰ Não chegou</span>
+                      )}
+                      {!status && (
+                        <span className="text-[11px] text-slate-400">No prazo</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button onClick={() => clearSc(itemId)} className="px-2 py-1 bg-slate-400 text-white rounded text-xs hover:bg-slate-500 transition">Remover</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
               {/* ── CADASTRAR / EDITAR ── */}
               {activeTab === 'register' && (
                 <div className="max-w-lg mx-auto space-y-5">
