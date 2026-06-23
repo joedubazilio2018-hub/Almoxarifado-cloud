@@ -336,11 +336,13 @@ export default function InventoryApp() {
     return                                         { label: 'Ideal',   status: 'healthy' };
   }, [items, getQty]);
 
-   const isScAtrasada = useCallback((itemId) => {
+  const getScStatus = useCallback((itemId) => {
   const sc = scMap[itemId];
-  if (!sc || !sc.dateEta) return false;
+  if (!sc || !sc.dateEta) return null;
   const hoje = today();
-  return sc.dateEta < hoje;
+  if (sc.dateEta === hoje) return 'chega_hoje';
+  if (sc.dateEta < hoje)   return 'atrasada';
+  return null; // ainda no prazo, sem aviso
 }, [scMap]);
 
 const getLastMovements = useCallback((itemId) => {
@@ -758,15 +760,20 @@ getLastMovements(item.id).map((mov, idx) => (
                                 <h3 className="font-bold text-slate-900 text-sm mt-0.5">{item.name}</h3>
                                 <p className="text-[11px] text-slate-400 mt-0.5">📍 {item.location || 'Sem local'}</p>
                               </div>
-                              <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${isCritical ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {isCritical ? '🔴 CRÍTICO' : '🟡 ATENÇÃO'}
-                              </span>
-                               {isScAtrasada(item.id) && (
-                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 animate-pulse">
-                              ⏰ SC ATRASADA
+                             <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${isCritical ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                             {isCritical ? '🔴 CRÍTICO' : '🟡 ATENÇÃO'}
+                             </span>
+                             {getScStatus(item.id) === 'chega_hoje' && (
+                             <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700">
+                             📦 Chega hoje
                              </span>
                              )}
-                             </div>
+                            {getScStatus(item.id) === 'atrasada' && (
+                            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 animate-pulse">
+                            ⏰ Não chegou
+                           </span>
+                           )}
+                           </div>
                             <div className="grid grid-cols-3 text-center bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs">
                               <div><p className="text-slate-400">Mínimo</p><p className="font-bold text-slate-700 mt-0.5">{item.minStock}</p></div>
                               <div className="border-x border-slate-200"><p className="text-slate-400">Atual</p><p className={`font-bold text-lg mt-0.5 ${isCritical ? 'text-red-600' : 'text-amber-600'}`}>{qty}</p></div>
