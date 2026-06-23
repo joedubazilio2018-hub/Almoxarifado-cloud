@@ -336,6 +336,13 @@ export default function InventoryApp() {
     return                                         { label: 'Ideal',   status: 'healthy' };
   }, [items, getQty]);
 
+   const isScAtrasada = useCallback((itemId) => {
+  const sc = scMap[itemId];
+  if (!sc || !sc.dateEta) return false;
+  const hoje = today();
+  return sc.dateEta < hoje;
+}, [scMap]);
+
 const getLastMovements = useCallback((itemId) => {
   const inbound = inboundLog
     .filter(r => r.itemId === itemId)
@@ -754,7 +761,12 @@ getLastMovements(item.id).map((mov, idx) => (
                               <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${isCritical ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
                                 {isCritical ? '🔴 CRÍTICO' : '🟡 ATENÇÃO'}
                               </span>
-                            </div>
+                               {isScAtrasada(item.id) && (
+                              <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-purple-100 text-purple-700 animate-pulse">
+                              ⏰ SC ATRASADA
+                             </span>
+                             )}
+                             </div>
                             <div className="grid grid-cols-3 text-center bg-slate-50 rounded-xl p-3 border border-slate-100 text-xs">
                               <div><p className="text-slate-400">Mínimo</p><p className="font-bold text-slate-700 mt-0.5">{item.minStock}</p></div>
                               <div className="border-x border-slate-200"><p className="text-slate-400">Atual</p><p className={`font-bold text-lg mt-0.5 ${isCritical ? 'text-red-600' : 'text-amber-600'}`}>{qty}</p></div>
