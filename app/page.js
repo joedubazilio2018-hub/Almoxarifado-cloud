@@ -530,19 +530,19 @@ const getLastMovements = useCallback((itemId) => {
   }
 
   const navItems = [
-    { id: 'stock',    icon: '📦', label: 'Estoque',                          activeColor: 'bg-blue-600'    },
-    { id: 'kanban',   icon: '⚠️', label: `Kanban (${criticalItems.length})`, activeColor: 'bg-amber-600'   },
-    { id: 'register', icon: '➕', label: editingItem ? 'Editando' : 'Cadastrar', activeColor: 'bg-slate-600' },
-    { id: 'inbound',  icon: '📥', label: 'Entrada',                          activeColor: 'bg-emerald-700' },
-    { id: 'outbound', icon: '📤', label: 'Saída',                            activeColor: 'bg-rose-700'    },
-  ];
-
+  { id: 'stock',    icon: '📦', label: 'Estoque',                          activeColor: 'bg-blue-600'    },
+  { id: 'kanban',   icon: '⚠️', label: `Kanban (${criticalItems.length})`, activeColor: 'bg-amber-600'   },
+  { id: 'sc',       icon: '🛒', label: `SC Compra (${Object.keys(scMap).length})`, activeColor: 'bg-purple-600' },
+  { id: 'register', icon: '➕', label: editingItem ? 'Editando' : 'Cadastrar', activeColor: 'bg-slate-600' },
+  { id: 'inbound',  icon: '📥', label: 'Entrada',                          activeColor: 'bg-emerald-700' },
+  { id: 'outbound', icon: '📤', label: 'Saída',                            activeColor: 'bg-rose-700'    },
+];
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row" style={{ fontFamily: 'DM Sans, sans-serif' }}>
       <Toast toast={toast} />
 
       {/* SIDEBAR */}
-      <aside className="bg-slate-900 text-white w-full md:w-60 flex flex-col shrink-0">
+     <aside className="bg-slate-900 text-white w-full md:w-60 flex flex-col shrink-0 md:sticky md:top-0 md:h-screen">
         <div className="p-5 border-b border-slate-800 flex items-center justify-between md:justify-start gap-3">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-base shadow">📦</div>
