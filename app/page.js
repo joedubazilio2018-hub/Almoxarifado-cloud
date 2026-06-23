@@ -700,6 +700,7 @@ export default function InventoryApp() {
     </td>
   </tr>
 )}
+</React.Fragment>
                             );
                           })}
                         </tbody>
