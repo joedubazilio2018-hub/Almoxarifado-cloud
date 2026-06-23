@@ -887,83 +887,85 @@ getLastMovements(item.id).map((mov, idx) => (
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {Object.keys(scMap).length === 0 ? (
-                <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-400">Nenhuma SC ativa.</td></tr>
-              ) : {Object.entries(scMap).map(([itemId, sc]) => {
-  const item = items.find(i => i.id === itemId);
-  const status = getScStatus(itemId);
+  {Object.keys(scMap).length === 0 ? (
+    <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-400">Nenhuma SC ativa.</td></tr>
+  ) : (
+    Object.entries(scMap).map(([itemId, sc]) => {
+      const item = items.find(i => i.id === itemId);
+      const status = getScStatus(itemId);
 
-  if (editingSc === itemId) {
-    return (
-      <tr key={itemId} className="bg-blue-50">
-        <td className="px-4 py-3">
-          <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
-          <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
-        </td>
-        <td className="px-4 py-2">
-          <Input ringColor="blue" mono type="text" value={editScForm.sc}
-            onChange={e => setEditScForm({ ...editScForm, sc: e.target.value })}
-            className="text-xs py-1.5" />
-        </td>
-        <td className="px-4 py-2">
-          <Input ringColor="blue" type="date" value={editScForm.dateSc}
-            onChange={e => setEditScForm({ ...editScForm, dateSc: e.target.value })}
-            className="text-xs py-1.5" />
-        </td>
-        <td className="px-4 py-2">
-          <Input ringColor="blue" type="date" value={editScForm.dateEta}
-            onChange={e => setEditScForm({ ...editScForm, dateEta: e.target.value })}
-            className="text-xs py-1.5" />
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-[11px] text-slate-400">Editando...</span>
-        </td>
-        <td className="px-4 py-3 text-center">
-          <div className="flex gap-1.5 justify-center">
-            <button onClick={() => saveEditSc(itemId)} disabled={saving}
-              className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 transition disabled:opacity-50">
-              Salvar
-            </button>
-            <button onClick={cancelEditSc}
-              className="px-2 py-1 bg-slate-300 text-slate-700 rounded text-xs hover:bg-slate-400 transition">
-              Cancelar
-            </button>
-          </div>
-        </td>
-      </tr>
-    );
-  }
+      if (editingSc === itemId) {
+        return (
+          <tr key={itemId} className="bg-blue-50">
+            <td className="px-4 py-3">
+              <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
+              <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
+            </td>
+            <td className="px-4 py-2">
+              <Input ringColor="blue" mono type="text" value={editScForm.sc}
+                onChange={e => setEditScForm({ ...editScForm, sc: e.target.value })}
+                className="text-xs py-1.5" />
+            </td>
+            <td className="px-4 py-2">
+              <Input ringColor="blue" type="date" value={editScForm.dateSc}
+                onChange={e => setEditScForm({ ...editScForm, dateSc: e.target.value })}
+                className="text-xs py-1.5" />
+            </td>
+            <td className="px-4 py-2">
+              <Input ringColor="blue" type="date" value={editScForm.dateEta}
+                onChange={e => setEditScForm({ ...editScForm, dateEta: e.target.value })}
+                className="text-xs py-1.5" />
+            </td>
+            <td className="px-4 py-3">
+              <span className="text-[11px] text-slate-400">Editando...</span>
+            </td>
+            <td className="px-4 py-3 text-center">
+              <div className="flex gap-1.5 justify-center">
+                <button onClick={() => saveEditSc(itemId)} disabled={saving}
+                  className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 transition disabled:opacity-50">
+                  Salvar
+                </button>
+                <button onClick={cancelEditSc}
+                  className="px-2 py-1 bg-slate-300 text-slate-700 rounded text-xs hover:bg-slate-400 transition">
+                  Cancelar
+                </button>
+              </div>
+            </td>
+          </tr>
+        );
+      }
 
-  return (
-    <tr key={itemId} className="hover:bg-slate-50 transition-colors">
-      <td className="px-4 py-3">
-        <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
-        <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
-      </td>
-      <td className="px-4 py-3 font-mono text-xs text-blue-700">{sc.sc}</td>
-      <td className="px-4 py-3 text-xs text-slate-600">{fmtDate(sc.dateSc)}</td>
-      <td className="px-4 py-3 text-xs text-slate-600">{sc.dateEta ? fmtDate(sc.dateEta) : '—'}</td>
-      <td className="px-4 py-3">
-        {status === 'chega_hoje' && (
-          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">📦 Chega hoje</span>
-        )}
-        {status === 'atrasada' && (
-          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">⏰ Não chegou</span>
-        )}
-        {!status && (
-          <span className="text-[11px] text-slate-400">No prazo</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        <div className="flex gap-1.5 justify-center">
-          <button onClick={() => openEditSc(itemId)} className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition">Editar</button>
-          <button onClick={() => clearSc(itemId)} className="px-2 py-1 bg-slate-400 text-white rounded text-xs hover:bg-slate-500 transition">Remover</button>
-        </div>
-      </td>
-    </tr>
-  );
-})}
-            </tbody>
+      return (
+        <tr key={itemId} className="hover:bg-slate-50 transition-colors">
+          <td className="px-4 py-3">
+            <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
+            <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
+          </td>
+          <td className="px-4 py-3 font-mono text-xs text-blue-700">{sc.sc}</td>
+          <td className="px-4 py-3 text-xs text-slate-600">{fmtDate(sc.dateSc)}</td>
+          <td className="px-4 py-3 text-xs text-slate-600">{sc.dateEta ? fmtDate(sc.dateEta) : '—'}</td>
+          <td className="px-4 py-3">
+            {status === 'chega_hoje' && (
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">📦 Chega hoje</span>
+            )}
+            {status === 'atrasada' && (
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">⏰ Não chegou</span>
+            )}
+            {!status && (
+              <span className="text-[11px] text-slate-400">No prazo</span>
+            )}
+          </td>
+          <td className="px-4 py-3 text-center">
+            <div className="flex gap-1.5 justify-center">
+              <button onClick={() => openEditSc(itemId)} className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition">Editar</button>
+              <button onClick={() => clearSc(itemId)} className="px-2 py-1 bg-slate-400 text-white rounded text-xs hover:bg-slate-500 transition">Remover</button>
+            </div>
+          </td>
+        </tr>
+      );
+    })
+  )}
+</tbody>
           </table>
         </div>
       </div>
