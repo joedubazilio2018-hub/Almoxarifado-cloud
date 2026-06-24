@@ -74,7 +74,7 @@ function rowToOutbound(r) {
   return { id: r.id, itemId: r.item_id, qty: r.qty, date: r.date, notes: r.notes };
 }
 function rowToSc(r) {
-  return { itemId: r.item_id, sc: r.sc, dateSc: r.date_sc, dateEta: r.date_eta };
+  return { itemId: r.item_id, sc: r.sc, qty: r.qty, dateSc: r.date_sc, dateEta: r.date_eta };
 }
 
 /* ─────────────────────────────────────────────
@@ -278,9 +278,11 @@ export default function InventoryApp() {
   const [newItem, setNewItem] = useState({ id: '', name: '', location: '', application: '', unit: 'Un', minStock: '', maxStock: '' });
   const [newInbound,  setNewInbound]  = useState({ itemId: '', qty: '', date: today(), sc: '' });
   const [newOutbound, setNewOutbound] = useState({ itemId: '', qty: '', date: today(), notes: '' });
-  const [newSc, setNewSc] = useState({ itemId: '', sc: '', dateSc: today(), dateEta: '' });
+  const [receivingSc, setReceivingSc] = useState(null); // itemId em processo de recebimento
+  const [receiveQty, setReceiveQty] = useState('');
+  const [newSc, setNewSc] = useState({ itemId: '', sc: '', qty: '', dateSc: today(), dateEta: '' });
   const [editingSc, setEditingSc] = useState(null); // itemId da SC em edição
-  const [editScForm, setEditScForm] = useState({ sc: '', dateSc: '', dateEta: '' });
+  const [editScForm, setEditScForm] = useState({ sc: '', qty: '', dateSc: '', dateEta: '' });
   const [searchQuery, setSearchQuery] = useState('');
   const [toast,       setToast]       = useState(null);
   const [editingItem, setEditingItem] = useState(null);
@@ -373,12 +375,12 @@ const getLastMovements = useCallback((itemId) => {
 }, [inboundLog, outboundLog]);
   /* ── SC ── */
   const saveSc = useCallback(async (itemId, data) => {
-    try {
-      await api.upsertSc({ item_id: itemId, sc: data.sc, date_sc: data.dateSc, date_eta: data.dateEta || null });
-      setScMap(prev => ({ ...prev, [itemId]: data }));
-      showToast('SC registrada!');
-    } catch { showToast('Erro ao salvar SC.', 'error'); }
-  }, [showToast]);
+  try {
+    await api.upsertSc({ item_id: itemId, sc: data.sc, qty: Number(data.qty) || null, date_sc: data.dateSc, date_eta: data.dateEta || null });
+    setScMap(prev => ({ ...prev, [itemId]: data }));
+    showToast('SC registrada!');
+  } catch { showToast('Erro ao salvar SC.', 'error'); }
+}, [showToast]);
 
   const clearSc = useCallback(async (itemId) => {
     try {
@@ -516,7 +518,7 @@ const getLastMovements = useCallback((itemId) => {
 };
    const openEditSc = (itemId) => {
   const sc = scMap[itemId];
-  setEditScForm({ sc: sc.sc, dateSc: sc.dateSc, dateEta: sc.dateEta || '' });
+  setEditScForm({ sc: sc.sc, qty: sc.qty || '', dateSc: sc.dateSc, dateEta: sc.dateEta || '' });
   setEditingSc(itemId);
 };
 
@@ -529,6 +531,25 @@ const saveEditSc = async (itemId) => {
     showToast('SC atualizada!');
   } catch {
     showToast('Erro ao atualizar SC.', 'error');
+  } finally {
+    setSaving(false);
+  }
+};
+   const handleReceiveSc = async (itemId) => {
+  if (!receiveQty || Number(receiveQty) <= 0) return showToast('Informe a quantidade recebida.', 'error');
+  setSaving(true);
+  try {
+    const sc = scMap[itemId];
+    const row = { id: `IN-${Date.now()}`, item_id: itemId, qty: Number(receiveQty), date: today(), sc: sc?.sc || '' };
+    await api.insertInbound(row);
+    setInboundLog(prev => [...prev, rowToInbound(row)]);
+    await clearSc(itemId);
+    const name = items.find(i => i.id === itemId)?.name;
+    setReceivingSc(null);
+    setReceiveQty('');
+    showToast(`Entrada de "${name}" registrada e SC encerrada!`);
+  } catch {
+    showToast('Erro ao registrar entrada.', 'error');
   } finally {
     setSaving(false);
   }
@@ -853,14 +874,19 @@ getLastMovements(item.id).map((mov, idx) => (
             getQty={getQty} showStock={true} ringColor="blue" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Nº da SC">
-            <Input ringColor="blue" mono type="text" required placeholder="SC-2026-99"
-              value={newSc.sc} onChange={e => setNewSc({ ...newSc, sc: e.target.value })} />
-          </Field>
-          <Field label="Data da SC">
-            <Input ringColor="blue" type="date" required
-              value={newSc.dateSc} onChange={e => setNewSc({ ...newSc, dateSc: e.target.value })} />
-          </Field>
+  <Field label="Nº da SC">
+    <Input ringColor="blue" mono type="text" required placeholder="SC-2026-99"
+      value={newSc.sc} onChange={e => setNewSc({ ...newSc, sc: e.target.value })} />
+  </Field>
+  <Field label="Quantidade Solicitada">
+    <Input ringColor="blue" type="number" required min="1" placeholder="Ex: 50"
+      value={newSc.qty} onChange={e => setNewSc({ ...newSc, qty: e.target.value })} />
+  </Field>
+</div>
+<Field label="Data da SC">
+  <Input ringColor="blue" type="date" required
+    value={newSc.dateSc} onChange={e => setNewSc({ ...newSc, dateSc: e.target.value })} />
+</Field>
         </div>
         <Field label="Previsão de Chegada">
           <Input ringColor="blue" type="date"
@@ -880,6 +906,7 @@ getLastMovements(item.id).map((mov, idx) => (
               <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-widest text-slate-400">
                 <th className="px-4 py-3 text-left">Item</th>
                 <th className="px-4 py-3 text-left">Nº SC</th>
+                <th className="px-4 py-3 text-left">Qtd.</th>
                 <th className="px-4 py-3 text-left">Data SC</th>
                 <th className="px-4 py-3 text-left">Previsão</th>
                 <th className="px-4 py-3 text-left">Status</th>
@@ -905,6 +932,11 @@ getLastMovements(item.id).map((mov, idx) => (
               <Input ringColor="blue" mono type="text" value={editScForm.sc}
                 onChange={e => setEditScForm({ ...editScForm, sc: e.target.value })}
                 className="text-xs py-1.5" />
+            </td>
+            <td className="px-4 py-2">
+              <Input ringColor="blue" type="number" min="1" value={editScForm.qty}
+               onChange={e => setEditScForm({ ...editScForm, qty: e.target.value })}
+               className="text-xs py-1.5" />
             </td>
             <td className="px-4 py-2">
               <Input ringColor="blue" type="date" value={editScForm.dateSc}
@@ -936,32 +968,62 @@ getLastMovements(item.id).map((mov, idx) => (
       }
 
       return (
-        <tr key={itemId} className="hover:bg-slate-50 transition-colors">
-          <td className="px-4 py-3">
-            <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
-            <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
-          </td>
-          <td className="px-4 py-3 font-mono text-xs text-blue-700">{sc.sc}</td>
-          <td className="px-4 py-3 text-xs text-slate-600">{fmtDate(sc.dateSc)}</td>
-          <td className="px-4 py-3 text-xs text-slate-600">{sc.dateEta ? fmtDate(sc.dateEta) : '—'}</td>
-          <td className="px-4 py-3">
-            {status === 'chega_hoje' && (
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">📦 Chega hoje</span>
-            )}
-            {status === 'atrasada' && (
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">⏰ Não chegou</span>
-            )}
-            {!status && (
-              <span className="text-[11px] text-slate-400">No prazo</span>
-            )}
-          </td>
-          <td className="px-4 py-3 text-center">
-            <div className="flex gap-1.5 justify-center">
-              <button onClick={() => openEditSc(itemId)} className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition">Editar</button>
-              <button onClick={() => clearSc(itemId)} className="px-2 py-1 bg-slate-400 text-white rounded text-xs hover:bg-slate-500 transition">Remover</button>
-            </div>
-          </td>
-        </tr>
+        <React.Fragment key={itemId}>
+          <tr className="hover:bg-slate-50 transition-colors">
+            <td className="px-4 py-3">
+              <span className="font-semibold text-slate-800">{item ? item.name : itemId}</span>
+              <span className="text-[11px] text-slate-400 ml-2 font-mono">[{itemId}]</span>
+            </td>
+            <td className="px-4 py-3 font-mono text-xs text-blue-700">{sc.sc}</td>
+            <td className="px-4 py-3 text-xs text-slate-600">{sc.qty || '—'} {item?.unit || ''}</td>
+            <td className="px-4 py-3 text-xs text-slate-600">{fmtDate(sc.dateSc)}</td>
+            <td className="px-4 py-3 text-xs text-slate-600">{sc.dateEta ? fmtDate(sc.dateEta) : '—'}</td>
+            <td className="px-4 py-3">
+              {status === 'chega_hoje' && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">📦 Chega hoje</span>
+              )}
+              {status === 'atrasada' && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">⏰ Não chegou</span>
+              )}
+              {!status && (
+                <span className="text-[11px] text-slate-400">No prazo</span>
+              )}
+            </td>
+            <td className="px-4 py-3 text-center">
+              <div className="flex gap-1.5 justify-center">
+                <button onClick={() => { setReceivingSc(itemId); setReceiveQty(sc.qty || ''); }}
+                  className="px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700 transition">
+                  ✓ Chegou
+                </button>
+                <button onClick={() => openEditSc(itemId)} className="px-2 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600 transition">Editar</button>
+                <button onClick={() => clearSc(itemId)} className="px-2 py-1 bg-slate-400 text-white rounded text-xs hover:bg-slate-500 transition">Remover</button>
+              </div>
+            </td>
+          </tr>
+
+          {receivingSc === itemId && (
+            <tr className="bg-emerald-50">
+              <td colSpan="7" className="px-4 py-3">
+                <div className="flex flex-wrap items-end gap-3">
+                  <span className="text-xs font-bold text-emerald-700">📥 Confirmar recebimento de "{item?.name}":</span>
+                  <div className="w-32">
+                    <Input ringColor="emerald" type="number" min="1" placeholder="Qtd. recebida"
+                      value={receiveQty} onChange={e => setReceiveQty(e.target.value)}
+                      className="text-xs py-1.5" />
+                  </div>
+                  <button onClick={() => handleReceiveSc(itemId)} disabled={saving}
+                    className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold hover:bg-emerald-700 transition disabled:opacity-50">
+                    Confirmar Entrada
+                  </button>
+                  <button onClick={() => { setReceivingSc(null); setReceiveQty(''); }}
+                    className="px-3 py-1.5 bg-slate-300 text-slate-700 rounded text-xs hover:bg-slate-400 transition">
+                    Cancelar
+                  </button>
+                </div>
+              </td>
+            </tr>
+          )}
+        </React.Fragment>
       );
     })
   )}
