@@ -281,6 +281,7 @@ export default function InventoryApp() {
   const [receivingSc, setReceivingSc] = useState(null); // itemId em processo de recebimento
   const [receiveQty, setReceiveQty] = useState('');
   const [newSc, setNewSc] = useState({ itemId: '', sc: '', qty: '', dateSc: today(), dateEta: '' });
+  const [scSortOrder, setScSortOrder] = useState('desc'); // 'asc' ou 'desc'
   const [editingSc, setEditingSc] = useState(null); // itemId da SC em edição
   const [editScForm, setEditScForm] = useState({ sc: '', qty: '', dateSc: '', dateEta: '' });
   const [searchQuery, setSearchQuery] = useState('');
@@ -494,7 +495,13 @@ const getLastMovements = useCallback((itemId) => {
       showToast(`Saída de "${name}" confirmada!`);
     } catch { showToast('Erro ao registrar saída.', 'error'); }
     finally { setSaving(false); }
-  };
+  }; 
+  
+   const sortedScEntries = Object.entries(scMap).sort((a, b) => {
+  const dateA = a[1].dateSc || '';
+  const dateB = b[1].dateSc || '';
+  return scSortOrder === 'asc' ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
+});
 
   const filteredItems = items.filter(i =>
     i.name.toLowerCase().includes(searchQuery.toLowerCase()) || i.id.includes(searchQuery)
@@ -908,7 +915,15 @@ getLastMovements(item.id).map((mov, idx) => (
                 <th className="px-4 py-3 text-left">Item</th>
                 <th className="px-4 py-3 text-left">Nº SC</th>
                 <th className="px-4 py-3 text-left">Qtd.</th>
-                <th className="px-4 py-3 text-left">Data SC</th>
+                <th className="px-4 py-3 text-left">
+                    <button
+    onClick={() => setScSortOrder(o => o === 'asc' ? 'desc' : 'asc')}
+    className="flex items-center gap-1 hover:text-slate-600 transition"
+  >
+    Data SC
+    <span className="text-[10px]">{scSortOrder === 'asc' ? '▲' : '▼'}</span>
+  </button>
+</th>
                 <th className="px-4 py-3 text-left">Previsão</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-center">Ações</th>
@@ -918,7 +933,7 @@ getLastMovements(item.id).map((mov, idx) => (
   {Object.keys(scMap).length === 0 ? (
     <tr><td colSpan="6" className="px-4 py-10 text-center text-slate-400">Nenhuma SC ativa.</td></tr>
   ) : (
-    Object.entries(scMap).map(([itemId, sc]) => {
+    sortedScEntries.map(([itemId, sc]) => {
       const item = items.find(i => i.id === itemId);
       const status = getScStatus(itemId);
 
