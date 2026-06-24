@@ -883,11 +883,12 @@ getLastMovements(item.id).map((mov, idx) => (
       value={newSc.qty} onChange={e => setNewSc({ ...newSc, qty: e.target.value })} />
   </Field>
 </div>
+         
 <Field label="Data da SC">
   <Input ringColor="blue" type="date" required
     value={newSc.dateSc} onChange={e => setNewSc({ ...newSc, dateSc: e.target.value })} />
 </Field>
-        </div>
+        
         <Field label="Previsão de Chegada">
           <Input ringColor="blue" type="date"
             value={newSc.dateEta} onChange={e => setNewSc({ ...newSc, dateEta: e.target.value })} />
