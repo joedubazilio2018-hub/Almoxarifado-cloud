@@ -701,7 +701,7 @@ export default function InventoryApp() {
                     {itemsByCategory.length === 0 ? (
                       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center text-slate-400">Nenhum item encontrado.</div>
                     ) : itemsByCategory.map(([catId, group]) => {
-                      const isCollapsed = collapsedCats[catId];
+                      const isCollapsed = collapsedCats[catId] === undefined ? true : collapsedCats[catId];
                       return (
                         <div key={catId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                           {/* Cabeçalho da categoria — clicável */}
