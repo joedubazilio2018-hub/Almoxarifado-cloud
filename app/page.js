@@ -356,7 +356,7 @@ export default function InventoryApp() {
     if (!items.length) return showToast('Nenhum item para exportar.', 'error');
     setExporting(true);
     try {
-      const XLSX = await import('https://esm.sh/xlsx@0.18.5');
+      const XLSX = await import('xlsx');
       const linhas = [...items]
         .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
         .map(item => ({
