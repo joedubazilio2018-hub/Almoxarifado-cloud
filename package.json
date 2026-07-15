@@ -10,7 +10,8 @@
   "dependencies": {
     "next": "15.4.10",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.19",
