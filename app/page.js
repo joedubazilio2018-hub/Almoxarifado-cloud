@@ -297,6 +297,7 @@ export default function InventoryApp() {
   const [toast,       setToast]       = useState(null);
   const [editingItem, setEditingItem] = useState(null);
   const [saving,      setSaving]      = useState(false);
+  const [exporting,   setExporting]   = useState(false);
   const [expandedItem,    setExpandedItem]    = useState(null);
   const [collapsedCats,   setCollapsedCats]   = useState({});
 
@@ -349,6 +350,34 @@ export default function InventoryApp() {
     const totalOut = outboundLog.filter(r => r.itemId === itemId).reduce((s, r) => s + Number(r.qty), 0);
     return totalIn - totalOut;
   }, [inboundLog, outboundLog]);
+
+  /* ── Exportar estoque para Excel (recontagem) ── */
+  const exportarEstoqueExcel = useCallback(async () => {
+    if (!items.length) return showToast('Nenhum item para exportar.', 'error');
+    setExporting(true);
+    try {
+      const XLSX = await import('https://esm.sh/xlsx@0.18.5');
+      const linhas = [...items]
+        .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+        .map(item => ({
+          'Código':           item.id,
+          'Descrição':        item.name,
+          'Quantidade Atual': getQty(item.id),
+        }));
+      const ws = XLSX.utils.json_to_sheet(linhas);
+      ws['!cols'] = [{ wch: 12 }, { wch: 45 }, { wch: 16 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Estoque');
+      const dataStr = today();
+      XLSX.writeFile(wb, `recontagem-estoque_${dataStr}.xlsx`);
+      showToast('Planilha exportada com sucesso!', 'success');
+    } catch (e) {
+      console.error('Erro ao exportar Excel:', e);
+      showToast('Erro ao gerar a planilha. Verifique sua conexão.', 'error');
+    } finally {
+      setExporting(false);
+    }
+  }, [items, getQty, showToast]);
 
   const getKanban = useCallback((itemId) => {
     const qty  = getQty(itemId);
@@ -692,6 +721,11 @@ export default function InventoryApp() {
                     <div className="flex gap-2">
                       <input type="text" placeholder="🔍 Buscar por código ou nome…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                         className="px-4 py-2.5 border border-slate-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 w-full sm:w-72 shadow-sm" />
+                      <button onClick={exportarEstoqueExcel} disabled={exporting}
+                        className="px-3 py-2.5 border border-slate-200 rounded-xl bg-white text-slate-600 hover:text-blue-600 hover:border-blue-300 transition text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-wait"
+                        title="Exportar planilha para recontagem">
+                        {exporting ? '⏳' : '📥'} <span className="hidden sm:inline">Excel</span>
+                      </button>
                       <button onClick={loadAll} className="px-3 py-2 border border-slate-200 rounded-xl bg-white text-slate-500 hover:text-emerald-600 hover:border-emerald-300 transition text-sm" title="Sincronizar">↻</button>
                     </div>
                   </div>
