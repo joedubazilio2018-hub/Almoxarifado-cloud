@@ -66,6 +66,27 @@ function fmtDate(d) {
   return `${day}/${m}/${y}`;
 }
 
+const MESES_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+function monthKey(dateStr) {
+  return dateStr ? dateStr.slice(0, 7) : '';
+}
+function monthLabel(key) {
+  if (!key) return '—';
+  const [y, m] = key.split('-');
+  return `${MESES_PT[Number(m) - 1]}/${y}`;
+}
+function getMonthsBetween(startKey, endKey) {
+  const months = [];
+  let [y, m] = startKey.split('-').map(Number);
+  const [ey, em] = endKey.split('-').map(Number);
+  while (y < ey || (y === ey && m <= em)) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return months;
+}
+
 function rowToItem(r) {
   return { id: r.id, name: r.name, location: r.location || '', application: r.application || '', unit: r.unit, minStock: r.min_stock, maxStock: r.max_stock, categoryId: r.category_id || null };
 }
@@ -298,6 +319,14 @@ export default function InventoryApp() {
   const [editingItem, setEditingItem] = useState(null);
   const [saving,      setSaving]      = useState(false);
   const [exporting,   setExporting]   = useState(false);
+
+  // Relatório mensal (consumo x compra)
+  const [reportStart,     setReportStart]     = useState(today().slice(0, 7));
+  const [reportEnd,       setReportEnd]       = useState(today().slice(0, 7));
+  const [reportCategory,  setReportCategory]  = useState('all');
+  const [expandedReportItem,  setExpandedReportItem]  = useState(null);
+  const [collapsedReportCats, setCollapsedReportCats] = useState({});
+  const [exportingReportPdf,  setExportingReportPdf]  = useState(false);
   const [expandedItem,    setExpandedItem]    = useState(null);
   const [collapsedCats,   setCollapsedCats]   = useState({});
 
@@ -564,6 +593,147 @@ export default function InventoryApp() {
     setCollapsedCats(prev => ({ ...prev, [catId]: !prev[catId] }));
   };
 
+  const toggleReportCategory = (catId) => {
+    setCollapsedReportCats(prev => ({ ...prev, [catId]: !prev[catId] }));
+  };
+
+  /* ── Relatório mensal: consumo x compra por item ── */
+  const reportData = React.useMemo(() => {
+    if (!reportStart || !reportEnd) return { valid: false, groups: [], months: [] };
+    const startKey = reportStart <= reportEnd ? reportStart : reportEnd;
+    const endKey   = reportStart <= reportEnd ? reportEnd   : reportStart;
+    const months = getMonthsBetween(startKey, endKey);
+    const firstDayOfPeriod = `${startKey}-01`;
+
+    const scopedItems = items.filter(i => reportCategory === 'all' || (i.categoryId || '__none__') === reportCategory);
+
+    const rows = scopedItems.map(item => {
+      const inbound  = inboundLog.filter(r => r.itemId === item.id);
+      const outbound = outboundLog.filter(r => r.itemId === item.id);
+
+      const saldoInicial =
+        inbound.filter(r => r.date < firstDayOfPeriod).reduce((s, r) => s + Number(r.qty), 0) -
+        outbound.filter(r => r.date < firstDayOfPeriod).reduce((s, r) => s + Number(r.qty), 0);
+
+      let saldoCorrente = saldoInicial;
+      const monthly = months.map(mk => {
+        const entradas = inbound.filter(r => monthKey(r.date) === mk).reduce((s, r) => s + Number(r.qty), 0);
+        const saidas   = outbound.filter(r => monthKey(r.date) === mk).reduce((s, r) => s + Number(r.qty), 0);
+        saldoCorrente += entradas - saidas;
+        return { month: mk, entradas, saidas, saldoFinal: saldoCorrente };
+      });
+
+      const totalEntradas = monthly.reduce((s, m) => s + m.entradas, 0);
+      const totalSaidas   = monthly.reduce((s, m) => s + m.saidas, 0);
+      const saldoFinalPeriodo = monthly.length ? monthly[monthly.length - 1].saldoFinal : saldoInicial;
+      const mediaMensalConsumo = totalSaidas / months.length;
+      const coberturaDias = mediaMensalConsumo > 0 ? Math.round((saldoFinalPeriodo / mediaMensalConsumo) * 30) : null;
+
+      let statusEstoque = 'sem-min';
+      if (item.minStock !== '' && item.minStock != null) {
+        if (saldoFinalPeriodo < Number(item.minStock)) statusEstoque = 'critico';
+        else if (saldoFinalPeriodo <= Number(item.minStock) * 1.3) statusEstoque = 'atencao';
+        else statusEstoque = 'ideal';
+      }
+
+      return {
+        itemId: item.id, itemName: item.name, unit: item.unit,
+        categoryId: item.categoryId || '__none__',
+        minStock: item.minStock, maxStock: item.maxStock,
+        saldoInicial, monthly, totalEntradas, totalSaidas,
+        mediaMensalConsumo, saldoFinalPeriodo, coberturaDias, statusEstoque,
+      };
+    });
+
+    const groupMap = {};
+    groupMap['__none__'] = { catId: '__none__', name: 'Sem Categoria', rows: [] };
+    categories.forEach(cat => { groupMap[cat.id] = { catId: cat.id, name: cat.name, rows: [] }; });
+    rows.forEach(r => { (groupMap[r.categoryId] || groupMap['__none__']).rows.push(r); });
+    const groups = Object.values(groupMap)
+      .filter(g => g.rows.length > 0)
+      .map(g => ({ ...g, rows: g.rows.sort((a, b) => a.itemName.localeCompare(b.itemName, 'pt-BR')) }));
+
+    return { valid: true, groups, months };
+  }, [items, inboundLog, outboundLog, categories, reportStart, reportEnd, reportCategory]);
+
+  /* ── Exportar relatório em PDF ── */
+  const exportarRelatorioPdf = useCallback(async () => {
+    if (!reportData.valid || reportData.groups.length === 0) {
+      return showToast('Nenhum dado para gerar o relatório neste período.', 'error');
+    }
+    setExportingReportPdf(true);
+    try {
+      const [{ jsPDF }, { autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const pageWidth  = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 32;
+      let y = margin;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('Relatório de Consumo e Compra por Item', margin, y);
+      y += 20;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(90);
+      const periodoTxt = `Período: ${monthLabel(reportData.months[0])} a ${monthLabel(reportData.months[reportData.months.length - 1])}`;
+      const catTxt = reportCategory === 'all' ? 'Categoria: Todas' : `Categoria: ${categories.find(c => c.id === reportCategory)?.name || 'Sem Categoria'}`;
+      doc.text(`${periodoTxt}   •   ${catTxt}   •   Gerado em ${fmtDate(today())}`, margin, y);
+      doc.setTextColor(0);
+      y += 16;
+
+      reportData.groups.forEach(group => {
+        if (y > pageHeight - 100) { doc.addPage(); y = margin; }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(12);
+        doc.text(group.name, margin, y);
+        y += 8;
+
+        group.rows.forEach(row => {
+          if (y > pageHeight - 90) { doc.addPage(); y = margin; }
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text(`[${row.itemId}] ${row.itemName}`, margin, y + 10);
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(8);
+          doc.setTextColor(100);
+          const resumo = `Saldo inicial: ${row.saldoInicial} ${row.unit}   |   Total compras: ${row.totalEntradas}   |   Total consumo: ${row.totalSaidas}   |   Média mensal: ${row.mediaMensalConsumo.toFixed(1)}   |   Saldo final: ${row.saldoFinalPeriodo}   |   Cobertura estimada: ${row.coberturaDias != null ? row.coberturaDias + ' dias' : 'N/A'}   |   Mín/Máx: ${row.minStock ?? '—'}/${row.maxStock ?? '—'}`;
+          doc.text(resumo, margin, y + 22, { maxWidth: pageWidth - margin * 2 });
+          doc.setTextColor(0);
+
+          autoTable(doc, {
+            startY: y + 30,
+            margin: { left: margin, right: margin },
+            head: [['Mês', `Compras (${row.unit})`, `Consumo (${row.unit})`, `Saldo Final (${row.unit})`]],
+            body: row.monthly.map(m => [monthLabel(m.month), m.entradas, m.saidas, m.saldoFinal]),
+            theme: 'grid',
+            styles: { fontSize: 8, cellPadding: 4 },
+            headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+            didParseCell: (data) => {
+              if (data.section === 'body' && data.column.index === 3) {
+                const val = Number(data.cell.raw);
+                if (row.minStock !== '' && row.minStock != null && val < Number(row.minStock)) {
+                  data.cell.styles.textColor = [185, 28, 28];
+                  data.cell.styles.fontStyle = 'bold';
+                }
+              }
+            },
+          });
+          y = doc.lastAutoTable.finalY + 18;
+        });
+      });
+
+      doc.save(`relatorio-consumo-compra_${monthLabel(reportData.months[0]).replace('/', '-')}_a_${monthLabel(reportData.months[reportData.months.length - 1]).replace('/', '-')}.pdf`);
+      showToast('Relatório PDF gerado com sucesso!', 'success');
+    } catch (e) {
+      console.error('Erro ao gerar PDF do relatório:', e);
+      showToast('Erro ao gerar o PDF. Tente novamente.', 'error');
+    } finally {
+      setExportingReportPdf(false);
+    }
+  }, [reportData, reportCategory, categories, showToast]);
+
   const handleRegisterSc = async (e) => {
     e.preventDefault();
     if (!newSc.itemId || !newSc.sc) return showToast('Selecione o item e informe o número da SC.', 'error');
@@ -659,6 +829,7 @@ export default function InventoryApp() {
     { id: 'stock',    icon: '📦', label: 'Estoque',                                      activeColor: 'bg-blue-600'    },
     { id: 'kanban',   icon: '⚠️', label: `Kanban (${criticalItems.length})`,             activeColor: 'bg-amber-600'   },
     { id: 'sc',       icon: '🛒', label: `SC Compra (${Object.keys(scMap).length})`,     activeColor: 'bg-purple-600'  },
+    { id: 'reports',  icon: '📊', label: 'Relatórios',                                   activeColor: 'bg-slate-700'   },
     { id: 'register', icon: '➕', label: editingItem ? 'Editando' : 'Cadastrar',         activeColor: 'bg-slate-600'   },
     { id: 'inbound',  icon: '📥', label: 'Entrada',                                      activeColor: 'bg-emerald-700' },
     { id: 'outbound', icon: '📤', label: 'Saída',                                        activeColor: 'bg-rose-700'    },
@@ -1090,6 +1261,139 @@ export default function InventoryApp() {
                         </table>
                       </div>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── RELATÓRIOS ── */}
+              {activeTab === 'reports' && (
+                <div className="space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-3 justify-between">
+                    <div>
+                      <h1 className="text-xl font-bold text-slate-900">Relatório de Consumo e Compra</h1>
+                      <p className="text-slate-400 text-xs mt-0.5">Movimentação mensal por item — ideal para análise (ex: enviar para uma IA)</p>
+                    </div>
+                    <button onClick={exportarRelatorioPdf} disabled={exportingReportPdf}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-wait shadow-sm">
+                      {exportingReportPdf ? '⏳ Gerando...' : '📄 Baixar PDF'}
+                    </button>
+                  </div>
+
+                  {/* Filtros */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col sm:flex-row gap-3 sm:items-end">
+                    <Field label="Mês inicial">
+                      <Input type="month" value={reportStart} onChange={e => setReportStart(e.target.value)} />
+                    </Field>
+                    <Field label="Mês final">
+                      <Input type="month" value={reportEnd} onChange={e => setReportEnd(e.target.value)} />
+                    </Field>
+                    <Field label="Categoria">
+                      <Select value={reportCategory} onChange={e => setReportCategory(e.target.value)}>
+                        <option value="all">Todas as categorias</option>
+                        <option value="__none__">Sem Categoria</option>
+                        {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+
+                  {/* Resultado */}
+                  <div className="space-y-4">
+                    {!reportData.valid || reportData.groups.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-10 text-center text-slate-400">
+                        Nenhum item encontrado para o período/categoria selecionados.
+                      </div>
+                    ) : reportData.groups.map(group => {
+                      const isCollapsed = collapsedReportCats[group.catId] === undefined ? false : collapsedReportCats[group.catId];
+                      return (
+                        <div key={group.catId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                          <button onClick={() => toggleReportCategory(group.catId)}
+                            className="w-full flex items-center justify-between px-5 py-3 bg-slate-50 hover:bg-slate-100 transition border-b border-slate-200">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{isCollapsed ? '▶' : '▼'}</span>
+                              <span className="font-bold text-slate-700 text-sm">{group.name}</span>
+                              <span className="text-[11px] text-slate-400 bg-slate-200 rounded-full px-2 py-0.5 font-semibold">{group.rows.length} {group.rows.length === 1 ? 'item' : 'itens'}</span>
+                            </div>
+                          </button>
+
+                          {!isCollapsed && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-100 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                                    <th className="px-4 py-3 text-left">Item</th>
+                                    <th className="px-4 py-3 text-center">Compras (período)</th>
+                                    <th className="px-4 py-3 text-center">Consumo (período)</th>
+                                    <th className="px-4 py-3 text-center">Média mensal</th>
+                                    <th className="px-4 py-3 text-center">Saldo final</th>
+                                    <th className="px-4 py-3 text-center">Cobertura</th>
+                                    <th className="px-4 py-3 text-left">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {group.rows.map(row => {
+                                    const statusMap = {
+                                      critico: { label: 'CRÍTICO', status: 'danger' },
+                                      atencao: { label: 'ATENÇÃO', status: 'warning' },
+                                      ideal:   { label: 'Ideal',   status: 'healthy' },
+                                      'sem-min': null,
+                                    };
+                                    const st = statusMap[row.statusEstoque];
+                                    return (
+                                      <React.Fragment key={row.itemId}>
+                                        <tr className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-4 py-3">
+                                            <button onClick={() => setExpandedReportItem(expandedReportItem === row.itemId ? null : row.itemId)}
+                                              className="font-semibold text-slate-900 hover:text-blue-600 transition flex items-center gap-2">
+                                              <span className="font-mono text-xs text-slate-400">{row.itemId}</span> {row.itemName}
+                                              <span className="text-xs text-slate-400">{expandedReportItem === row.itemId ? '▲' : '▼'}</span>
+                                            </button>
+                                          </td>
+                                          <td className="px-4 py-3 text-center text-emerald-700 font-semibold">{row.totalEntradas} <span className="text-[11px] text-slate-400">{row.unit}</span></td>
+                                          <td className="px-4 py-3 text-center text-rose-700 font-semibold">{row.totalSaidas} <span className="text-[11px] text-slate-400">{row.unit}</span></td>
+                                          <td className="px-4 py-3 text-center text-slate-600">{row.mediaMensalConsumo.toFixed(1)}</td>
+                                          <td className="px-4 py-3 text-center font-bold text-slate-900">{row.saldoFinalPeriodo}</td>
+                                          <td className="px-4 py-3 text-center text-slate-500">{row.coberturaDias != null ? `${row.coberturaDias} dias` : '—'}</td>
+                                          <td className="px-4 py-3">{st ? <StatusBadge status={st.status} label={st.label} /> : <span className="text-[11px] text-slate-300">—</span>}</td>
+                                        </tr>
+                                        {expandedReportItem === row.itemId && (
+                                          <tr>
+                                            <td colSpan="7" className="bg-slate-50 px-6 py-4">
+                                              <p className="text-xs font-bold text-slate-500 uppercase mb-2">Detalhamento mensal</p>
+                                              <div className="overflow-x-auto">
+                                                <table className="w-full text-xs bg-white rounded-lg border border-slate-200">
+                                                  <thead>
+                                                    <tr className="bg-slate-100 text-slate-500">
+                                                      <th className="px-3 py-2 text-left">Mês</th>
+                                                      <th className="px-3 py-2 text-center">Compras</th>
+                                                      <th className="px-3 py-2 text-center">Consumo</th>
+                                                      <th className="px-3 py-2 text-center">Saldo Final</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody className="divide-y divide-slate-100">
+                                                    {row.monthly.map(m => (
+                                                      <tr key={m.month}>
+                                                        <td className="px-3 py-1.5">{monthLabel(m.month)}</td>
+                                                        <td className="px-3 py-1.5 text-center text-emerald-700">{m.entradas}</td>
+                                                        <td className="px-3 py-1.5 text-center text-rose-700">{m.saidas}</td>
+                                                        <td className="px-3 py-1.5 text-center font-semibold">{m.saldoFinal}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
