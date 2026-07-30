@@ -182,3 +182,178 @@ export default function Reformas() {
         status: 'recebido',
       };
       const [novaReforma] = await reformasApi.insertReforma(payload);
+      const reformaId = novaReforma.id;
+
+      const modelosRows = modelos
+        .filter(m => m.modelo && m.quantidade)
+        .map(m => ({ reforma_id: reformaId, modelo: m.modelo, quantidade: Number(m.quantidade) }));
+      const rodasRows = rodas
+        .filter(r => r.tamanho && r.quantidade)
+        .map(r => ({ reforma_id: reformaId, tamanho: r.tamanho, material: r.material || null, quantidade: Number(r.quantidade) }));
+      const protetoresRows = protetores
+        .filter(p => p.tipo && p.quantidade)
+        .map(p => ({ reforma_id: reformaId, tipo: p.tipo, quantidade: Number(p.quantidade) }));
+
+      await Promise.all([
+        modelosRows.length    ? reformasApi.insertModelos(modelosRows)       : Promise.resolve(),
+        rodasRows.length      ? reformasApi.insertRodas(rodasRows)           : Promise.resolve(),
+        protetoresRows.length ? reformasApi.insertProtetores(protetoresRows) : Promise.resolve(),
+      ]);
+
+      setMsg({ text: `Reforma "${payload.reforma}" registrada!`, type: 'success' });
+      resetForm();
+      await loadReformas();
+    } catch (err) {
+      console.error('❌ Erro ao salvar reforma:', err);
+      setMsg({ text: 'Erro ao salvar reforma.', type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ─────────────────────────────────────────────
+     RENDER
+  ───────────────────────────────────────────── */
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-bold text-indigo-800">Reformas de Carrinho</h1>
+        <p className="text-slate-400 text-xs mt-0.5">Recebido → Em produção → Em separação → Finalizado</p>
+      </div>
+
+      {msg && (
+        <div className={`px-4 py-3 rounded-xl text-sm font-semibold border ${msg.type === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+          {msg.text}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5 max-w-2xl">
+        <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Nova Reforma — preencha tudo que já souber</p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Reforma">
+            <Input type="text" required placeholder="Ex: Reforma 001"
+              value={form.reforma} onChange={e => setForm({ ...form, reforma: e.target.value })} />
+          </Field>
+          <Field label="Quantidade">
+            <Input type="number" min="1" placeholder="Ex: 10"
+              value={form.quantidade} onChange={e => setForm({ ...form, quantidade: e.target.value })} />
+          </Field>
+        </div>
+
+        <Field label="Cliente">
+          <Input type="text" placeholder="Nome do cliente"
+            value={form.cliente} onChange={e => setForm({ ...form, cliente: e.target.value })} />
+        </Field>
+
+        <Field label="Logo definida">
+          <Input type="text" placeholder="Ex: Sim / Não / detalhes"
+            value={form.logo_definida} onChange={e => setForm({ ...form, logo_definida: e.target.value })} />
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Cor do perfil (chegou)">
+            <Input type="text" placeholder="Cor recebida"
+              value={form.cor_perfil_chegou} onChange={e => setForm({ ...form, cor_perfil_chegou: e.target.value })} />
+          </Field>
+          <Field label="Cor do perfil (definida)">
+            <Input type="text" placeholder="Cor definida, se já souber"
+              value={form.cor_perfil_definida} onChange={e => setForm({ ...form, cor_perfil_definida: e.target.value })} />
+          </Field>
+        </div>
+
+        <Field label="Tipo de perfil">
+          <Select value={form.tipo_perfil} onChange={e => setForm({ ...form, tipo_perfil: e.target.value })}>
+            <option value="">— Selecione —</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+          </Select>
+        </Field>
+
+        <Field label="Observação (erros / refugo)">
+          <TextArea placeholder="Anotações sobre erros, refugo etc."
+            value={form.observacao} onChange={e => setForm({ ...form, observacao: e.target.value })} />
+        </Field>
+
+        {/* Modelos */}
+        <div className="pt-4 border-t border-slate-100 space-y-2">
+          <label className={labelCls}>Modelo(s) do carrinho</label>
+          {modelos.map((row, idx) => (
+            <RepeatableRow key={idx} onRemove={() => removeRow(setModelos, idx)}>
+              <Select value={row.modelo} onChange={e => updateRow(setModelos, idx, 'modelo', e.target.value)}>
+                {MODELOS_OPCOES.map(m => <option key={m} value={m}>{m}</option>)}
+              </Select>
+              <input type="number" min="1" placeholder="Qtd." value={row.quantidade}
+                onChange={e => updateRow(setModelos, idx, 'quantidade', e.target.value)}
+                className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+            </RepeatableRow>
+          ))}
+          <AddRowBtn onClick={addModelo}>Adicionar modelo</AddRowBtn>
+        </div>
+
+        {/* Rodas */}
+        <div className="pt-4 border-t border-slate-100 space-y-2">
+          <label className={labelCls}>Rodas</label>
+          {rodas.map((row, idx) => (
+            <RepeatableRow key={idx} onRemove={() => removeRow(setRodas, idx)}>
+              <Select value={row.tamanho} onChange={e => updateRow(setRodas, idx, 'tamanho', e.target.value)}>
+                {RODA_TAMANHOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </Select>
+              <Select value={row.material} onChange={e => updateRow(setRodas, idx, 'material', e.target.value)}>
+                {RODA_MATERIAIS.map(m => <option key={m} value={m}>{m}</option>)}
+              </Select>
+              <input type="number" min="1" placeholder="Qtd." value={row.quantidade}
+                onChange={e => updateRow(setRodas, idx, 'quantidade', e.target.value)}
+                className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+            </RepeatableRow>
+          ))}
+          <AddRowBtn onClick={addRoda}>Adicionar roda</AddRowBtn>
+        </div>
+
+        {/* Protetores */}
+        <div className="pt-4 border-t border-slate-100 space-y-2">
+          <label className={labelCls}>Protetores</label>
+          {protetores.map((row, idx) => (
+            <RepeatableRow key={idx} onRemove={() => removeRow(setProtetores, idx)}>
+              <Select value={row.tipo} onChange={e => updateRow(setProtetores, idx, 'tipo', e.target.value)}>
+                {PROTETOR_TIPOS.map(t => <option key={t} value={t}>{t}</option>)}
+              </Select>
+              <input type="number" min="1" placeholder="Qtd." value={row.quantidade}
+                onChange={e => updateRow(setProtetores, idx, 'quantidade', e.target.value)}
+                className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+            </RepeatableRow>
+          ))}
+          <AddRowBtn onClick={addProtetor}>Adicionar protetor</AddRowBtn>
+        </div>
+
+        <button type="submit" disabled={saving}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all text-sm tracking-wide shadow-sm hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed">
+          {saving ? 'Salvando...' : 'Registrar Reforma'}
+        </button>
+      </form>
+
+      {/* Lista simples — só pra confirmar que salvou (Passo 1; cards bonitos entram no Passo 2) */}
+      <div>
+        <h2 className="text-sm font-bold text-slate-600 mb-3">Reformas registradas ({reformas.length})</h2>
+        {loading ? (
+          <p className="text-sm text-slate-400">Carregando...</p>
+        ) : reformas.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400 text-sm">Nenhuma reforma registrada ainda.</div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+            {reformas.map(r => (
+              <div key={r.id} className="px-4 py-3 flex items-center justify-between text-sm">
+                <span>
+                  <span className="font-semibold text-slate-800">{r.reforma}</span>
+                  {r.cliente ? ` — ${r.cliente}` : ''}
+                  {r.quantidade ? ` · Qtd: ${r.quantidade}` : ''}
+                </span>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{STATUS_LABEL[r.status] || r.status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
