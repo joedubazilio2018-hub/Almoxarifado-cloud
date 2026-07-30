@@ -60,6 +60,7 @@ const MODELOS_OPCOES = ['101', '102', '103', '107', '110/111', '114/115', '118/1
 const RODA_TAMANHOS   = ['4"', '5"', '6"', '6" carga'];
 const RODA_MATERIAIS  = ['PU', 'PVC'];
 const PROTETOR_TIPOS  = ['PP', 'PVC', 'JUMBOCAR', 'CUNHA', 'TUBO FREE', 'TUBO B3', 'TUBO ID', '16X30', 'ANATÔMICO', 'ANATÔMICO (OBLONGO)'];
+const METROS_PERFIL_POR_CARRINHO = 3;
 
 const STATUS_LABEL = {
   recebido:      'Recebido',
@@ -224,6 +225,7 @@ export default function Reformas() {
     return totalIn - totalOut;
   };
   const perfilItems = items.filter(i => i.name.toLowerCase().includes('perfil'));
+  const calcConsumoPerfil = () => form.quantidade ? Number(form.quantidade) * METROS_PERFIL_POR_CARRINHO : '';
 
   const loadEstoque = async () => {
     try {
@@ -277,7 +279,7 @@ export default function Reformas() {
   const addModelo    = () => setModelos(prev => [...prev, { modelo: MODELOS_OPCOES[0], quantidade: '' }]);
   const addRoda       = () => setRodas(prev => [...prev, { tamanho: RODA_TAMANHOS[0], material: RODA_MATERIAIS[0], quantidade: '' }]);
   const addProtetor   = () => setProtetores(prev => [...prev, { tipo: PROTETOR_TIPOS[0], quantidade: '' }]);
-  const addPerfil      = () => setPerfis(prev => [...prev, { item_id: '', quantidade: '' }]);
+  const addPerfil      = () => setPerfis(prev => [...prev, { item_id: '', quantidade: calcConsumoPerfil() ? String(calcConsumoPerfil()) : '' }]);
 
   const updateRow = (setter, idx, field, value) => {
     setter(prev => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
@@ -472,15 +474,27 @@ export default function Reformas() {
         {/* Perfil — vinculado ao estoque real */}
         <div className="pt-4 border-t border-slate-100 space-y-2">
           <label className={labelCls}>Perfil (tipo B/C) — vinculado ao estoque</label>
+          {form.quantidade && (
+            <p className="text-[11px] text-slate-400">
+              Consumo calculado: {METROS_PERFIL_POR_CARRINHO}m × {form.quantidade} carrinho(s) = <span className="font-bold text-indigo-600">{calcConsumoPerfil()}m</span>
+            </p>
+          )}
           {perfis.map((row, idx) => (
             <RepeatableRow key={idx} onRemove={() => removeRow(setPerfis, idx)}>
               <div className="col-span-2">
                 <ItemSearchSelect items={perfilItems} value={row.item_id} getQty={getQty}
                   onChange={v => updateRow(setPerfis, idx, 'item_id', v)} />
               </div>
-              <input type="number" min="1" placeholder="Qtd." value={row.quantidade}
-                onChange={e => updateRow(setPerfis, idx, 'quantidade', e.target.value)}
-                className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+              <div className="flex gap-1">
+                <input type="number" min="1" placeholder="Metros" value={row.quantidade}
+                  onChange={e => updateRow(setPerfis, idx, 'quantidade', e.target.value)}
+                  className="flex-1 px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+                <button type="button" title="Recalcular a partir da quantidade de carrinhos"
+                  onClick={() => updateRow(setPerfis, idx, 'quantidade', String(calcConsumoPerfil()))}
+                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-300 transition">
+                  ↻
+                </button>
+              </div>
             </RepeatableRow>
           ))}
           <AddRowBtn onClick={addPerfil}>Adicionar perfil</AddRowBtn>
