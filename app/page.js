@@ -1581,3 +1581,4 @@ export default function InventoryApp() {
     </div>
   );
 }
+
