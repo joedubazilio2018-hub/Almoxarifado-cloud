@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import Reformas from '../components/Reformas';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG
@@ -829,6 +830,7 @@ export default function InventoryApp() {
     { id: 'stock',    icon: '📦', label: 'Estoque',                                      activeColor: 'bg-blue-600'    },
     { id: 'kanban',   icon: '⚠️', label: `Kanban (${criticalItems.length})`,             activeColor: 'bg-amber-600'   },
     { id: 'sc',       icon: '🛒', label: `SC Compra (${Object.keys(scMap).length})`,     activeColor: 'bg-purple-600'  },
+    { id: 'reformas', icon: '🛠️', label: 'Reformas', activeColor: 'bg-indigo-600' },
     { id: 'reports',  icon: '📊', label: 'Relatórios',                                   activeColor: 'bg-slate-700'   },
     { id: 'register', icon: '➕', label: editingItem ? 'Editando' : 'Cadastrar',         activeColor: 'bg-slate-600'   },
     { id: 'inbound',  icon: '📥', label: 'Entrada',                                      activeColor: 'bg-emerald-700' },
@@ -1569,6 +1571,9 @@ export default function InventoryApp() {
                   </form>
                 </div>
               )}
+
+              {/* ── REFORMAS ── */}
+              {activeTab === 'reformas' && <Reformas />}
             </>
           )}
         </div>
