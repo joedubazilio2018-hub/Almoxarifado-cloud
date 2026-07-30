@@ -225,7 +225,6 @@ export default function Reformas() {
     return totalIn - totalOut;
   };
   const perfilItems = items.filter(i => i.name.toLowerCase().includes('perfil'));
-  const calcConsumoPerfil = () => form.quantidade ? Number(form.quantidade) * METROS_PERFIL_POR_CARRINHO : '';
 
   const loadEstoque = async () => {
     try {
@@ -279,10 +278,16 @@ export default function Reformas() {
   const addModelo    = () => setModelos(prev => [...prev, { modelo: MODELOS_OPCOES[0], quantidade: '' }]);
   const addRoda       = () => setRodas(prev => [...prev, { tamanho: RODA_TAMANHOS[0], material: RODA_MATERIAIS[0], quantidade: '' }]);
   const addProtetor   = () => setProtetores(prev => [...prev, { tipo: PROTETOR_TIPOS[0], quantidade: '' }]);
-  const addPerfil      = () => setPerfis(prev => [...prev, { item_id: '', quantidade: calcConsumoPerfil() ? String(calcConsumoPerfil()) : '' }]);
+  const addPerfil      = () => setPerfis(prev => [...prev, { item_id: '', qtd_carrinho: '', quantidade: '' }]);
 
   const updateRow = (setter, idx, field, value) => {
     setter(prev => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
+  };
+  // Perfil é o único caso onde 1 campo (qtd. de carrinho) recalcula outro (metros usados) na mesma linha
+  const updatePerfilQtdCarrinho = (idx, value) => {
+    setPerfis(prev => prev.map((row, i) => (i === idx
+      ? { ...row, qtd_carrinho: value, quantidade: value ? String(Number(value) * METROS_PERFIL_POR_CARRINHO) : '' }
+      : row)));
   };
   const removeRow = (setter, idx) => setter(prev => prev.filter((_, i) => i !== idx));
 
@@ -376,7 +381,11 @@ export default function Reformas() {
     setModelos((r.modelos || []).map(m => ({ modelo: m.modelo, quantidade: m.quantidade ?? '' })));
     setRodas((r.rodas || []).map(rd => ({ tamanho: rd.tamanho, material: rd.material || '', quantidade: rd.quantidade ?? '' })));
     setProtetores((r.protetores || []).map(p => ({ tipo: p.tipo, quantidade: p.quantidade ?? '' })));
-    setPerfis((r.perfis || []).map(p => ({ item_id: p.item_id, quantidade: p.quantidade ?? '' })));
+    setPerfis((r.perfis || []).map(p => ({
+      item_id: p.item_id,
+      quantidade: p.quantidade ?? '',
+      qtd_carrinho: p.quantidade ? String(Math.round((Number(p.quantidade) / METROS_PERFIL_POR_CARRINHO) * 100) / 100) : '',
+    })));
     setMsg(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -471,31 +480,39 @@ export default function Reformas() {
           </Field>
         </div>
 
-        {/* Perfil — vinculado ao estoque real */}
+        {/* Perfil — vinculado ao estoque real; cálculo de metros é por linha (cada linha pode ser um modelo/cor diferente) */}
         <div className="pt-4 border-t border-slate-100 space-y-2">
           <label className={labelCls}>Perfil (tipo B/C) — vinculado ao estoque</label>
-          {form.quantidade && (
-            <p className="text-[11px] text-slate-400">
-              Consumo calculado: {METROS_PERFIL_POR_CARRINHO}m × {form.quantidade} carrinho(s) = <span className="font-bold text-indigo-600">{calcConsumoPerfil()}m</span>
-            </p>
-          )}
+          <p className="text-[11px] text-slate-400 -mt-1">Cada carrinho consome {METROS_PERFIL_POR_CARRINHO}m de perfil. Uma linha por cor/modelo.</p>
+
           {perfis.map((row, idx) => (
-            <RepeatableRow key={idx} onRemove={() => removeRow(setPerfis, idx)}>
-              <div className="col-span-2">
-                <ItemSearchSelect items={perfilItems} value={row.item_id} getQty={getQty}
-                  onChange={v => updateRow(setPerfis, idx, 'item_id', v)} />
-              </div>
-              <div className="flex gap-1">
-                <input type="number" min="1" placeholder="Metros" value={row.quantidade}
-                  onChange={e => updateRow(setPerfis, idx, 'quantidade', e.target.value)}
-                  className="flex-1 px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
-                <button type="button" title="Recalcular a partir da quantidade de carrinhos"
-                  onClick={() => updateRow(setPerfis, idx, 'quantidade', String(calcConsumoPerfil()))}
-                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-300 transition">
-                  ↻
+            <div key={idx} className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2.5">
+              <div className="flex items-start gap-2">
+                <div className="flex-1">
+                  <ItemSearchSelect items={perfilItems} value={row.item_id} getQty={getQty}
+                    onChange={v => updateRow(setPerfis, idx, 'item_id', v)} />
+                </div>
+                <button type="button" onClick={() => removeRow(setPerfis, idx)}
+                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-rose-600 hover:border-rose-300 transition"
+                  title="Remover esta linha">
+                  ✕
                 </button>
               </div>
-            </RepeatableRow>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">Quantidade de carrinho</label>
+                  <input type="number" min="1" placeholder="Ex: 10" value={row.qtd_carrinho}
+                    onChange={e => updatePerfilQtdCarrinho(idx, e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">Metros usado</label>
+                  <div className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-700">
+                    {row.quantidade ? `${row.quantidade} m` : '—'}
+                  </div>
+                </div>
+              </div>
+            </div>
           ))}
           <AddRowBtn onClick={addPerfil}>Adicionar perfil</AddRowBtn>
         </div>
