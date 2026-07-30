@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG (mesmo projeto do page.js)
@@ -42,6 +42,15 @@ const reformasApi = {
   getProtetores:    () => db('reforma_protetores'),
   insertProtetores: (rows) => db('reforma_protetores', { method: 'POST', prefer: 'return=minimal', body: JSON.stringify(rows) }),
   deleteProtetores: (reformaId) => db(`reforma_protetores?reforma_id=eq.${reformaId}`, { method: 'DELETE', prefer: '' }),
+
+  getPerfis:        () => db('reforma_perfis'),
+  insertPerfis:     (rows) => db('reforma_perfis', { method: 'POST', prefer: 'return=minimal', body: JSON.stringify(rows) }),
+  deletePerfis:     (reformaId) => db(`reforma_perfis?reforma_id=eq.${reformaId}`, { method: 'DELETE', prefer: '' }),
+
+  // Estoque real — só leitura, pra ligar o Tipo de perfil aos itens já cadastrados
+  getItems:      () => db('items?order=name'),
+  getInboundLog: () => db('inbound_log'),
+  getOutboundLog:() => db('outbound_log'),
 };
 
 /* ─────────────────────────────────────────────
@@ -128,6 +137,56 @@ function AddRowBtn({ onClick, children }) {
   );
 }
 
+/* Busca de item do estoque real, com aviso de disponível/indisponível */
+function ItemSearchSelect({ items, value, onChange, getQty }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen]   = useState(false);
+  const wrapRef           = useRef(null);
+  const selected          = items.find(i => i.id === value);
+  const filtered          = items.filter(i =>
+    i.name.toLowerCase().includes(query.toLowerCase()) || i.id.includes(query)
+  );
+  useEffect(() => {
+    function handler(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  return (
+    <div ref={wrapRef} className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-left flex justify-between items-center focus:outline-none focus:ring-2 focus:ring-indigo-400 transition">
+        <span className={selected ? 'text-slate-800' : 'text-slate-400'}>
+          {selected ? `${selected.name} — disponível: ${getQty(selected.id)} ${selected.unit || ''}` : '— Selecione o perfil —'}
+        </span>
+        <span className="text-slate-400 text-xs ml-2">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-slate-100">
+            <input autoFocus type="text" placeholder="🔍 Buscar perfil..." value={query}
+              onChange={e => setQuery(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+          </div>
+          <ul className="max-h-52 overflow-y-auto divide-y divide-slate-50">
+            {filtered.length === 0
+              ? <li className="px-4 py-3 text-sm text-slate-400 text-center">Nenhum item "perfil" encontrado no estoque.</li>
+              : filtered.map(item => {
+                  const stock = getQty(item.id);
+                  return (
+                    <li key={item.id} onClick={() => { onChange(item.id); setQuery(''); setOpen(false); }}
+                      className={`px-4 py-2.5 text-sm cursor-pointer hover:bg-slate-50 transition flex justify-between items-center ${value === item.id ? 'bg-indigo-50' : ''}`}>
+                      <span className="font-medium text-slate-800">{item.name}</span>
+                      <span className={`text-xs font-bold ml-3 shrink-0 ${stock <= 0 ? 'text-red-500' : 'text-emerald-600'}`}>{stock <= 0 ? 'Indisponível' : `${stock} ${item.unit || ''}`}</span>
+                    </li>
+                  );
+                })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────────
    COMPONENTE PRINCIPAL
 ───────────────────────────────────────────── */
@@ -138,7 +197,6 @@ const emptyForm = () => ({
   logo_definida: '',
   cor_perfil_chegou: '',
   cor_perfil_definida: '',
-  tipo_perfil: '',
   observacao: '',
 });
 
@@ -152,23 +210,52 @@ export default function Reformas() {
   const [modelos, setModelos]     = useState([]);
   const [rodas, setRodas]         = useState([]);
   const [protetores, setProtetores] = useState([]);
+  const [perfis, setPerfis]         = useState([]);
   const [editingId, setEditingId]   = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+
+  const [items, setItems]           = useState([]);
+  const [inboundLog, setInboundLog] = useState([]);
+  const [outboundLog, setOutboundLog] = useState([]);
+
+  const getQty = (itemId) => {
+    const totalIn  = inboundLog.filter(r => r.item_id === itemId).reduce((s, r) => s + Number(r.qty), 0);
+    const totalOut = outboundLog.filter(r => r.item_id === itemId).reduce((s, r) => s + Number(r.qty), 0);
+    return totalIn - totalOut;
+  };
+  const perfilItems = items.filter(i => i.name.toLowerCase().includes('perfil'));
+
+  const loadEstoque = async () => {
+    try {
+      const [rawItems, rawIn, rawOut] = await Promise.all([
+        reformasApi.getItems(),
+        reformasApi.getInboundLog(),
+        reformasApi.getOutboundLog(),
+      ]);
+      setItems(rawItems);
+      setInboundLog(rawIn);
+      setOutboundLog(rawOut);
+    } catch {
+      setMsg({ text: 'Erro ao carregar estoque de perfis.', type: 'error' });
+    }
+  };
 
   const loadReformas = async () => {
     setLoading(true);
     try {
-      const [rows, allModelos, allRodas, allProtetores] = await Promise.all([
+      const [rows, allModelos, allRodas, allProtetores, allPerfis] = await Promise.all([
         reformasApi.getReformas(),
         reformasApi.getModelos(),
         reformasApi.getRodas(),
         reformasApi.getProtetores(),
+        reformasApi.getPerfis(),
       ]);
       const merged = rows.map(r => ({
         ...r,
         modelos:    allModelos.filter(m => m.reforma_id === r.id),
         rodas:      allRodas.filter(m => m.reforma_id === r.id),
         protetores: allProtetores.filter(m => m.reforma_id === r.id),
+        perfis:     allPerfis.filter(m => m.reforma_id === r.id),
       }));
       setReformas(merged);
     } catch {
@@ -178,7 +265,7 @@ export default function Reformas() {
     }
   };
 
-  useEffect(() => { loadReformas(); }, []);
+  useEffect(() => { loadReformas(); loadEstoque(); }, []);
 
   useEffect(() => {
     if (!msg) return;
@@ -190,6 +277,7 @@ export default function Reformas() {
   const addModelo    = () => setModelos(prev => [...prev, { modelo: MODELOS_OPCOES[0], quantidade: '' }]);
   const addRoda       = () => setRodas(prev => [...prev, { tamanho: RODA_TAMANHOS[0], material: RODA_MATERIAIS[0], quantidade: '' }]);
   const addProtetor   = () => setProtetores(prev => [...prev, { tipo: PROTETOR_TIPOS[0], quantidade: '' }]);
+  const addPerfil      = () => setPerfis(prev => [...prev, { item_id: '', quantidade: '' }]);
 
   const updateRow = (setter, idx, field, value) => {
     setter(prev => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
@@ -201,6 +289,7 @@ export default function Reformas() {
     setModelos([]);
     setRodas([]);
     setProtetores([]);
+    setPerfis([]);
     setEditingId(null);
   };
 
@@ -212,6 +301,10 @@ export default function Reformas() {
     }
     setSaving(true);
     try {
+      const perfisValidos = perfis.filter(p => p.item_id && p.quantidade);
+      const primeiroPerfilItem = perfisValidos.length ? items.find(i => i.id === perfisValidos[0].item_id) : null;
+      const tipoPerfilDetectado = primeiroPerfilItem ? (primeiroPerfilItem.name.match(/\b([bc])\b/i)?.[1]?.toUpperCase() || null) : null;
+
       const payload = {
         reforma: form.reforma,
         quantidade: form.quantidade ? Number(form.quantidade) : null,
@@ -219,7 +312,7 @@ export default function Reformas() {
         logo_definida: form.logo_definida || null,
         cor_perfil_chegou: form.cor_perfil_chegou || null,
         cor_perfil_definida: form.cor_perfil_definida || null,
-        tipo_perfil: form.tipo_perfil || null,
+        tipo_perfil: tipoPerfilDetectado,
         observacao: form.observacao || null,
       };
 
@@ -230,6 +323,7 @@ export default function Reformas() {
           reformasApi.deleteModelos(editingId),
           reformasApi.deleteRodas(editingId),
           reformasApi.deleteProtetores(editingId),
+          reformasApi.deletePerfis(editingId),
         ]);
       } else {
         const [novaReforma] = await reformasApi.insertReforma({ ...payload, status: 'recebido' });
@@ -245,11 +339,14 @@ export default function Reformas() {
       const protetoresRows = protetores
         .filter(p => p.tipo && p.quantidade)
         .map(p => ({ reforma_id: reformaId, tipo: p.tipo, quantidade: Number(p.quantidade) }));
+      const perfisRows = perfisValidos
+        .map(p => ({ reforma_id: reformaId, item_id: p.item_id, quantidade: Number(p.quantidade) }));
 
       await Promise.all([
         modelosRows.length    ? reformasApi.insertModelos(modelosRows)       : Promise.resolve(),
         rodasRows.length      ? reformasApi.insertRodas(rodasRows)           : Promise.resolve(),
         protetoresRows.length ? reformasApi.insertProtetores(protetoresRows) : Promise.resolve(),
+        perfisRows.length     ? reformasApi.insertPerfis(perfisRows)         : Promise.resolve(),
       ]);
 
       setMsg({ text: editingId ? `Reforma "${payload.reforma}" atualizada!` : `Reforma "${payload.reforma}" registrada!`, type: 'success' });
@@ -272,12 +369,12 @@ export default function Reformas() {
       logo_definida: r.logo_definida || '',
       cor_perfil_chegou: r.cor_perfil_chegou || '',
       cor_perfil_definida: r.cor_perfil_definida || '',
-      tipo_perfil: r.tipo_perfil || '',
       observacao: r.observacao || '',
     });
     setModelos((r.modelos || []).map(m => ({ modelo: m.modelo, quantidade: m.quantidade ?? '' })));
     setRodas((r.rodas || []).map(rd => ({ tamanho: rd.tamanho, material: rd.material || '', quantidade: rd.quantidade ?? '' })));
     setProtetores((r.protetores || []).map(p => ({ tipo: p.tipo, quantidade: p.quantidade ?? '' })));
+    setPerfis((r.perfis || []).map(p => ({ item_id: p.item_id, quantidade: p.quantidade ?? '' })));
     setMsg(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -315,6 +412,7 @@ export default function Reformas() {
     if (r.modelos?.length)    parts.push(`Modelos: ${r.modelos.map(m => `${m.modelo}${m.quantidade ? ` (${m.quantidade})` : ''}`).join(', ')}`);
     if (r.rodas?.length)      parts.push(`Rodas: ${r.rodas.map(rd => `${rd.tamanho}${rd.material ? ` ${rd.material}` : ''}${rd.quantidade ? ` (${rd.quantidade})` : ''}`).join(', ')}`);
     if (r.protetores?.length) parts.push(`Protetores: ${r.protetores.map(p => `${p.tipo}${p.quantidade ? ` (${p.quantidade})` : ''}`).join(', ')}`);
+    if (r.perfis?.length)     parts.push(`Perfil: ${r.perfis.map(p => `${items.find(i => i.id === p.item_id)?.name || p.item_id}${p.quantidade ? ` (${p.quantidade})` : ''}`).join(', ')}`);
     return parts;
   };
 
@@ -371,13 +469,22 @@ export default function Reformas() {
           </Field>
         </div>
 
-        <Field label="Tipo de perfil">
-          <Select value={form.tipo_perfil} onChange={e => setForm({ ...form, tipo_perfil: e.target.value })}>
-            <option value="">— Selecione —</option>
-            <option value="B">B</option>
-            <option value="C">C</option>
-          </Select>
-        </Field>
+        {/* Perfil — vinculado ao estoque real */}
+        <div className="pt-4 border-t border-slate-100 space-y-2">
+          <label className={labelCls}>Perfil (tipo B/C) — vinculado ao estoque</label>
+          {perfis.map((row, idx) => (
+            <RepeatableRow key={idx} onRemove={() => removeRow(setPerfis, idx)}>
+              <div className="col-span-2">
+                <ItemSearchSelect items={perfilItems} value={row.item_id} getQty={getQty}
+                  onChange={v => updateRow(setPerfis, idx, 'item_id', v)} />
+              </div>
+              <input type="number" min="1" placeholder="Qtd." value={row.quantidade}
+                onChange={e => updateRow(setPerfis, idx, 'quantidade', e.target.value)}
+                className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+            </RepeatableRow>
+          ))}
+          <AddRowBtn onClick={addPerfil}>Adicionar perfil</AddRowBtn>
+        </div>
 
         <Field label="Observação (erros / refugo)">
           <TextArea placeholder="Anotações sobre erros, refugo etc."
