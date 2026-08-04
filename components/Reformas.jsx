@@ -275,7 +275,7 @@ export default function Reformas() {
   }, [msg]);
 
   /* ── Linhas dinâmicas ── */
-  const addModelo    = () => setModelos(prev => [...prev, { modelo: MODELOS_OPCOES[0], quantidade: '' }]);
+  const addModelo    = () => setModelos(prev => [...prev, { modelo: MODELOS_OPCOES[0], modelo_custom: '', quantidade: '' }]);
   const addRoda       = () => setRodas(prev => [...prev, { tamanho: RODA_TAMANHOS[0], material: RODA_MATERIAIS[0], quantidade: '' }]);
   const addProtetor   = () => setProtetores(prev => [...prev, { tipo: PROTETOR_TIPOS[0], quantidade: '' }]);
   const addPerfil      = () => setPerfis(prev => [...prev, { item_id: '', qtd_carrinho: '', quantidade: '' }]);
@@ -302,10 +302,6 @@ export default function Reformas() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.reforma) {
-      setMsg({ text: 'Preencha ao menos o número da Reforma.', type: 'error' });
-      return;
-    }
     setSaving(true);
     try {
       const perfisValidos = perfis.filter(p => p.item_id && p.quantidade);
@@ -313,7 +309,7 @@ export default function Reformas() {
       const tipoPerfilDetectado = primeiroPerfilItem ? (primeiroPerfilItem.name.match(/\b([bc])\b/i)?.[1]?.toUpperCase() || null) : null;
 
       const payload = {
-        reforma: form.reforma,
+        reforma: form.reforma.trim() || 'Não definida',
         quantidade: form.quantidade ? Number(form.quantidade) : null,
         cliente: form.cliente || null,
         logo_definida: form.logo_definida || null,
@@ -339,7 +335,11 @@ export default function Reformas() {
 
       const modelosRows = modelos
         .filter(m => m.modelo && m.quantidade)
-        .map(m => ({ reforma_id: reformaId, modelo: m.modelo, quantidade: Number(m.quantidade) }));
+        .map(m => ({
+          reforma_id: reformaId,
+          modelo: m.modelo === 'Outro' ? (m.modelo_custom.trim() || 'Outro') : m.modelo,
+          quantidade: Number(m.quantidade),
+        }));
       const rodasRows = rodas
         .filter(r => r.tamanho && r.quantidade)
         .map(r => ({ reforma_id: reformaId, tamanho: r.tamanho, material: r.material || null, quantidade: Number(r.quantidade) }));
@@ -378,7 +378,12 @@ export default function Reformas() {
       cor_perfil_definida: r.cor_perfil_definida || '',
       observacao: r.observacao || '',
     });
-    setModelos((r.modelos || []).map(m => ({ modelo: m.modelo, quantidade: m.quantidade ?? '' })));
+    setModelos((r.modelos || []).map(m => {
+      const isCustom = m.modelo && !MODELOS_OPCOES.includes(m.modelo);
+      return isCustom
+        ? { modelo: 'Outro', modelo_custom: m.modelo, quantidade: m.quantidade ?? '' }
+        : { modelo: m.modelo, modelo_custom: '', quantidade: m.quantidade ?? '' };
+    }));
     setRodas((r.rodas || []).map(rd => ({ tamanho: rd.tamanho, material: rd.material || '', quantidade: rd.quantidade ?? '' })));
     setProtetores((r.protetores || []).map(p => ({ tipo: p.tipo, quantidade: p.quantidade ?? '' })));
     setPerfis((r.perfis || []).map(p => ({
@@ -450,7 +455,7 @@ export default function Reformas() {
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Reforma">
-            <Input type="text" required placeholder="Ex: Reforma 001"
+            <Input type="text" placeholder="Deixe em branco se ainda não souber"
               value={form.reforma} onChange={e => setForm({ ...form, reforma: e.target.value })} />
           </Field>
           <Field label="Quantidade">
@@ -530,6 +535,11 @@ export default function Reformas() {
               <Select value={row.modelo} onChange={e => updateRow(setModelos, idx, 'modelo', e.target.value)}>
                 {MODELOS_OPCOES.map(m => <option key={m} value={m}>{m}</option>)}
               </Select>
+              {row.modelo === 'Outro' && (
+                <input type="text" placeholder="Qual modelo?" value={row.modelo_custom}
+                  onChange={e => updateRow(setModelos, idx, 'modelo_custom', e.target.value)}
+                  className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
+              )}
               <input type="number" min="1" placeholder="Qtd." value={row.quantidade}
                 onChange={e => updateRow(setModelos, idx, 'quantidade', e.target.value)}
                 className="px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 transition" />
