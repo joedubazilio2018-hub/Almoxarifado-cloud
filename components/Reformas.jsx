@@ -82,6 +82,17 @@ function fmtDate(iso) {
   return isNaN(d) ? '—' : d.toLocaleDateString('pt-BR');
 }
 
+/* Quadradinho de check impresso — não é um <input>, é só o desenho do
+   quadrado, pra imprimir de forma consistente e ser marcado à caneta. */
+function PrintCheckbox({ size = 16 }) {
+  return (
+    <span
+      style={{ width: size, height: size }}
+      className="inline-block shrink-0 border-2 border-slate-800 align-middle"
+    />
+  );
+}
+
 /* ─────────────────────────────────────────────
    UI HELPERS (auto-contidos, mesmo estilo do app)
 ───────────────────────────────────────────── */
@@ -189,6 +200,79 @@ function ItemSearchSelect({ items, value, onChange, getQty }) {
 }
 
 /* ─────────────────────────────────────────────
+   FOLHA DE SEPARAÇÃO — "Em produção", pronta pra imprimir
+───────────────────────────────────────────── */
+function PrintProducao({ reformas, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-start justify-center overflow-y-auto py-6 print:bg-white print:p-0 print:block">
+      <div className="w-full max-w-3xl mx-4">
+        {/* Barra de ações — some na impressão */}
+        <div className="print:hidden flex items-center justify-between mb-3 sticky top-0">
+          <p className="text-white font-bold text-sm">Folha de separação — Em produção ({reformas.length})</p>
+          <div className="flex gap-2">
+            <button onClick={() => window.print()}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold transition">
+              🖨️ Imprimir
+            </button>
+            <button onClick={onClose}
+              className="px-4 py-2 bg-white text-slate-600 rounded-lg text-sm font-bold hover:bg-slate-100 transition">
+              Fechar
+            </button>
+          </div>
+        </div>
+
+        {/* Conteúdo impresso */}
+        <div id="print-producao" className="bg-white rounded-2xl print:rounded-none p-6 print:p-0 space-y-5">
+          <div className="hidden print:block mb-2">
+            <h1 className="text-lg font-bold text-slate-800">Folha de separação — Reformas em produção</h1>
+            <p className="text-xs text-slate-500">Gerado em {new Date().toLocaleDateString('pt-BR')} · {reformas.length} reforma(s)</p>
+          </div>
+
+          {reformas.length === 0 ? (
+            <p className="text-sm text-slate-400 print:text-slate-600">Nenhuma reforma em produção no momento.</p>
+          ) : (
+            reformas.map((r, idx) => (
+              <div key={r.id} className="border border-slate-300 rounded-xl p-4 break-inside-avoid print:break-inside-avoid">
+                <div className="flex items-start gap-3 mb-3">
+                  <PrintCheckbox size={22} />
+                  <div className="flex-1">
+                    <p className="font-bold text-slate-800 text-sm">
+                      Nº da reforma: <span className="font-mono">{r.reforma || '—'}</span>
+                    </p>
+                    <p className="text-xs text-slate-500">Cliente: <span className="font-semibold text-slate-700">{r.cliente || '—'}</span></p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-700 mb-3 pl-1">
+                  <p><span className="text-slate-400">Cor do perfil:</span> {r.cor_perfil_definida || '—'}</p>
+                  <p><span className="text-slate-400">Tipo do perfil:</span> {r.tipo_perfil || '—'}</p>
+                </div>
+
+                <div className="pl-1">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Protetores</p>
+                  {r.protetores?.length ? (
+                    <div className="space-y-1.5">
+                      {r.protetores.map((p, i) => (
+                        <div key={i} className="flex items-center gap-2.5 text-xs text-slate-700">
+                          <PrintCheckbox size={14} />
+                          <span>{p.tipo} — Qtd: <span className="font-semibold">{p.quantidade}</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400">Nenhum protetor cadastrado.</p>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
    COMPONENTE PRINCIPAL
 ───────────────────────────────────────────── */
 const emptyForm = () => ({
@@ -214,6 +298,7 @@ export default function Reformas() {
   const [perfis, setPerfis]         = useState([]);
   const [editingId, setEditingId]   = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [showPrint, setShowPrint]   = useState(false);
 
   const [items, setItems]           = useState([]);
   const [inboundLog, setInboundLog] = useState([]);
@@ -422,6 +507,7 @@ export default function Reformas() {
 
   const emAndamento = reformas.filter(r => r.status !== 'finalizado');
   const finalizadas  = reformas.filter(r => r.status === 'finalizado');
+  const emProducao   = reformas.filter(r => r.status === 'em_producao');
 
   const lineItemsSummary = (r) => {
     const parts = [];
@@ -437,10 +523,18 @@ export default function Reformas() {
   ───────────────────────────────────────────── */
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-indigo-800">Reformas de Carrinho</h1>
-        <p className="text-slate-400 text-xs mt-0.5">Recebido → Em produção → Em separação → Finalizado</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-indigo-800">Reformas de Carrinho</h1>
+          <p className="text-slate-400 text-xs mt-0.5">Recebido → Em produção → Em separação → Finalizado</p>
+        </div>
+        <button onClick={() => setShowPrint(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold transition shrink-0">
+          🖨️ Imprimir folha de separação ({emProducao.length})
+        </button>
       </div>
+
+      {showPrint && <PrintProducao reformas={emProducao} onClose={() => setShowPrint(false)} />}
 
       {msg && (
         <div className={`px-4 py-3 rounded-xl text-sm font-semibold border ${msg.type === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
