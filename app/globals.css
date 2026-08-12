@@ -44,3 +44,23 @@ code, .font-mono {
 .tab-active-bar {
   transition: width 0.2s ease, left 0.2s ease;
 }
+
+/* Impressão da folha de separação (Reformas → Em produção) */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-producao,
+  #print-producao * {
+    visibility: visible;
+  }
+  #print-producao {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  @page {
+    margin: 12mm;
+  }
+}
