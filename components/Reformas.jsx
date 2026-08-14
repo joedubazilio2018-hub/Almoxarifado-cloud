@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { fmtDate, PrintCheckbox } from './printUtils';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG (mesmo projeto do page.js)
@@ -75,23 +76,6 @@ const STATUS_COLORS = {
   em_separacao: 'bg-purple-50 text-purple-700 border-purple-200',
   finalizado:   'bg-emerald-50 text-emerald-700 border-emerald-200',
 };
-
-function fmtDate(iso) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return isNaN(d) ? '—' : d.toLocaleDateString('pt-BR');
-}
-
-/* Quadradinho de check impresso — não é um <input>, é só o desenho do
-   quadrado, pra imprimir de forma consistente e ser marcado à caneta. */
-function PrintCheckbox({ size = 16 }) {
-  return (
-    <span
-      style={{ width: size, height: size }}
-      className="inline-block shrink-0 border-2 border-slate-800 align-middle"
-    />
-  );
-}
 
 /* ─────────────────────────────────────────────
    UI HELPERS (auto-contidos, mesmo estilo do app)
@@ -222,7 +206,7 @@ function PrintProducao({ reformas, onClose }) {
         </div>
 
         {/* Conteúdo impresso */}
-        <div id="print-producao" className="bg-white rounded-2xl print:rounded-none p-6 print:p-0 space-y-5">
+        <div id="print-producao" className="printable-sheet bg-white rounded-2xl print:rounded-none p-6 print:p-0 space-y-5">
           <div className="hidden print:block mb-2">
             <h1 className="text-lg font-bold text-slate-800">Folha de separação — Reformas em produção</h1>
             <p className="text-xs text-slate-500">Gerado em {new Date().toLocaleDateString('pt-BR')} · {reformas.length} reforma(s)</p>
