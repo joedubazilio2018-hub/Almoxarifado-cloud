@@ -54,12 +54,32 @@ code, .font-mono {
   #print-producao * {
     visibility: visible;
   }
+
+  /* O overlay do modal usa position:fixed + overflow-y:auto pra rolar
+     na tela — isso faz o navegador "prender" a impressão numa única
+     página visível e repeti-la. Na impressão, ele precisa virar um
+     bloco normal, sem limite de altura e sem corte de overflow, pra
+     o conteúdo fluir e paginar corretamente. */
+  .print-modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    display: block !important;
+  }
+  .print-modal-overlay > * {
+    max-width: none !important;
+    margin: 0 !important;
+  }
+
   #print-producao {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
   }
+
   @page {
     margin: 12mm;
   }
