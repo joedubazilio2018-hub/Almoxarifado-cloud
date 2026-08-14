@@ -1,10 +1,47 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PrintCheckbox } from './printUtils';
+
+/* ─────────────────────────────────────────────
+   SUPABASE CONFIG (mesmo projeto do page.js / Reformas.jsx)
+   Só leitura aqui — Etiquetas nunca escreve na tabela reformas.
+───────────────────────────────────────────── */
+const SUPA_URL = 'https://ujvaietlkqjwjfqtxoxn.supabase.co';
+const SUPA_KEY = 'sb_publishable_vrT8lrS0PBmL0LGbuBQPrg_jGNtO6wW';
+
+async function db(path) {
+  const res = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
+    headers: {
+      apikey: SUPA_KEY,
+      Authorization: `Bearer ${SUPA_KEY}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('❌ SUPABASE RAW ERROR (Etiquetas):', errText);
+    throw new Error(errText);
+  }
+  const data = await res.text();
+  return data ? JSON.parse(data) : [];
+}
+
+const reformasApi = {
+  // Só os campos que interessam aqui: nº da reforma, cliente e status (pra identificar na lista)
+  getReformas: () => db('reformas?select=id,reforma,cliente,status,created_at&order=created_at.desc'),
+};
+
+const STATUS_LABEL = {
+  recebido:      'Recebido',
+  em_producao:   'Em produção',
+  em_separacao:  'Em separação',
+  finalizado:    'Finalizado',
+};
 
 /* Campos disponíveis pra montar a etiqueta. Cada etiqueta da fila usa só
    os campos marcados como "incluir" — o resto nem aparece na impressão.
-   Isso não tem nenhuma ligação com o estoque, é só texto livre. */
+   É texto livre, exceto "Nº Reforma" e "Cliente", que também podem vir
+   vinculados a um registro real da tabela reformas (só leitura). */
 const FIELD_DEFS = [
   { key: 'item',    label: 'Item / Descrição', type: 'text' },
   { key: 'medida',  label: 'Medida',           type: 'text' },
@@ -38,6 +75,39 @@ export default function Etiquetas() {
   const [queue, setQueue]             = useState([]);
   const [showPrint, setShowPrint]     = useState(false);
 
+  // ── Vínculo com Reformas (só leitura: nº da reforma + cliente) ──
+  const [reformasList, setReformasList]         = useState([]);
+  const [loadingReformas, setLoadingReformas]   = useState(true);
+  const [reformasError, setReformasError]       = useState(false);
+  const [selectedReformaId, setSelectedReformaId] = useState('');
+
+  useEffect(() => {
+    reformasApi.getReformas()
+      .then(rows => setReformasList(rows))
+      .catch(() => setReformasError(true))
+      .finally(() => setLoadingReformas(false));
+  }, []);
+
+  const isLinked = selectedReformaId !== '';
+
+  function handleSelectReforma(id) {
+    if (!id) {
+      setSelectedReformaId('');
+      return;
+    }
+    const rec = reformasList.find(r => String(r.id) === String(id));
+    if (!rec) return;
+
+    setSelectedReformaId(id);
+    setValues(prev => ({ ...prev, reforma: rec.reforma || '', cliente: rec.cliente || '' }));
+    setIncluded(prev => ({ ...prev, reforma: true, cliente: true }));
+  }
+
+  function handleUnlinkReforma() {
+    setSelectedReformaId('');
+    // Mantém o que já estava preenchido, só destrava pra edição manual.
+  }
+
   const toggleField = (key) => setIncluded(prev => ({ ...prev, [key]: !prev[key] }));
   const setValue     = (key, v) => setValues(prev => ({ ...prev, [key]: v }));
 
@@ -59,6 +129,7 @@ export default function Etiquetas() {
     // pra facilitar preencher a próxima etiqueta igual.
     setValues(emptyValues());
     setStatus('');
+    setSelectedReformaId('');
   }
 
   function handleRemove(id) {
@@ -78,6 +149,48 @@ export default function Etiquetas() {
         </p>
       </div>
 
+      {/* ── Vínculo com Reforma ── */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5">
+        <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
+          Vincular a uma reforma existente <span className="text-slate-300 normal-case font-medium">(opcional)</span>
+        </p>
+        <p className="text-[11px] text-slate-400 mb-3">
+          Puxa automaticamente o Nº Reforma e o Cliente do registro selecionado. O resto da etiqueta continua sendo texto livre.
+        </p>
+
+        {reformasError ? (
+          <p className="text-xs text-amber-600">Não foi possível carregar as reformas agora. Preencha Nº Reforma e Cliente manualmente abaixo.</p>
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <select
+              value={selectedReformaId}
+              onChange={(e) => handleSelectReforma(e.target.value)}
+              disabled={loadingReformas}
+              className="flex-1 min-w-0 text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white disabled:text-slate-300"
+            >
+              <option value="">
+                {loadingReformas ? 'Carregando reformas...' : '— Nenhuma / preencher manualmente —'}
+              </option>
+              {reformasList.map(r => (
+                <option key={r.id} value={r.id}>
+                  Nº {r.reforma || '—'} — {r.cliente || 'sem cliente'} ({STATUS_LABEL[r.status] || r.status})
+                </option>
+              ))}
+            </select>
+
+            {isLinked && (
+              <button
+                type="button"
+                onClick={handleUnlinkReforma}
+                className="shrink-0 px-3 py-2 text-xs font-bold text-slate-500 border border-slate-200 rounded-lg hover:border-red-300 hover:text-red-500 transition"
+              >
+                🔗 Desvincular
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ── Formulário ── */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5">
         <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
@@ -85,25 +198,36 @@ export default function Etiquetas() {
         </p>
 
         <div className="grid sm:grid-cols-2 gap-3">
-          {FIELD_DEFS.map(f => (
-            <div key={f.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition ${included[f.key] ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200'}`}>
-              <input
-                type="checkbox"
-                checked={included[f.key]}
-                onChange={() => toggleField(f.key)}
-                className="w-4 h-4 accent-indigo-600 shrink-0"
-              />
-              <label className="text-xs font-semibold text-slate-600 w-28 shrink-0">{f.label}</label>
-              <input
-                type={f.type}
-                value={values[f.key]}
-                onChange={(e) => setValue(f.key, e.target.value)}
-                disabled={!included[f.key]}
-                placeholder={f.type === 'text' ? f.label : ''}
-                className="flex-1 min-w-0 text-sm bg-transparent outline-none disabled:text-slate-300"
-              />
-            </div>
-          ))}
+          {FIELD_DEFS.map(f => {
+            const lockedByReforma = isLinked && (f.key === 'reforma' || f.key === 'cliente');
+            return (
+              <div key={f.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition ${
+                lockedByReforma
+                  ? 'border-emerald-300 bg-emerald-50'
+                  : included[f.key] ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200'
+              }`}>
+                <input
+                  type="checkbox"
+                  checked={included[f.key]}
+                  onChange={() => toggleField(f.key)}
+                  className="w-4 h-4 accent-indigo-600 shrink-0"
+                />
+                <label className="text-xs font-semibold text-slate-600 w-28 shrink-0 flex items-center gap-1">
+                  {f.label}
+                  {lockedByReforma && <span title="Vinculado à reforma selecionada">🔗</span>}
+                </label>
+                <input
+                  type={f.type}
+                  value={values[f.key]}
+                  onChange={(e) => setValue(f.key, e.target.value)}
+                  disabled={!included[f.key]}
+                  readOnly={lockedByReforma}
+                  placeholder={f.type === 'text' ? f.label : ''}
+                  className={`flex-1 min-w-0 text-sm bg-transparent outline-none disabled:text-slate-300 ${lockedByReforma ? 'text-emerald-700 font-semibold' : ''}`}
+                />
+              </div>
+            );
+          })}
         </div>
 
         {/* Carimbo de status */}
