@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Reformas from '../components/Reformas';
+import Etiquetas from '../components/Etiquetas';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG
@@ -831,6 +832,7 @@ export default function InventoryApp() {
     { id: 'kanban',   icon: '⚠️', label: `Kanban (${criticalItems.length})`,             activeColor: 'bg-amber-600'   },
     { id: 'sc',       icon: '🛒', label: `SC Compra (${Object.keys(scMap).length})`,     activeColor: 'bg-purple-600'  },
     { id: 'reformas', icon: '🛠️', label: 'Reformas', activeColor: 'bg-indigo-600' },
+    { id: 'etiquetas', icon: '🏷️', label: 'Etiquetas', activeColor: 'bg-teal-600' },
     { id: 'reports',  icon: '📊', label: 'Relatórios',                                   activeColor: 'bg-slate-700'   },
     { id: 'register', icon: '➕', label: editingItem ? 'Editando' : 'Cadastrar',         activeColor: 'bg-slate-600'   },
     { id: 'inbound',  icon: '📥', label: 'Entrada',                                      activeColor: 'bg-emerald-700' },
@@ -1574,6 +1576,9 @@ export default function InventoryApp() {
 
               {/* ── REFORMAS ── */}
               {activeTab === 'reformas' && <Reformas />}
+
+              {/* ── ETIQUETAS ── */}
+              {activeTab === 'etiquetas' && <Etiquetas />}
             </>
           )}
         </div>
@@ -1581,4 +1586,3 @@ export default function InventoryApp() {
     </div>
   );
 }
-
