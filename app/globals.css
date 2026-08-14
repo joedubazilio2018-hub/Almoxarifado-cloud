@@ -45,13 +45,13 @@ code, .font-mono {
   transition: width 0.2s ease, left 0.2s ease;
 }
 
-/* Impressão da folha de separação (Reformas → Em produção) */
+/* Impressão de folhas/etiquetas (Reformas → Em produção, e aba Etiquetas) */
 @media print {
   body * {
     visibility: hidden;
   }
-  #print-producao,
-  #print-producao * {
+  .printable-sheet,
+  .printable-sheet * {
     visibility: visible;
   }
 
@@ -73,7 +73,7 @@ code, .font-mono {
     margin: 0 !important;
   }
 
-  #print-producao {
+  .printable-sheet {
     position: absolute;
     top: 0;
     left: 0;
