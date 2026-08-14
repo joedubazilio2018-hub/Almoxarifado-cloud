@@ -204,7 +204,7 @@ function ItemSearchSelect({ items, value, onChange, getQty }) {
 ───────────────────────────────────────────── */
 function PrintProducao({ reformas, onClose }) {
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-start justify-center overflow-y-auto py-6 print:bg-white print:p-0 print:block">
+    <div className="print-modal-overlay fixed inset-0 z-50 bg-slate-900/40 flex items-start justify-center overflow-y-auto py-6 print:bg-white print:p-0 print:block">
       <div className="w-full max-w-3xl mx-4">
         {/* Barra de ações — some na impressão */}
         <div className="print:hidden flex items-center justify-between mb-3 sticky top-0">
