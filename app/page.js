@@ -36,6 +36,14 @@ const api = {
   getItems:   () => db('items?order=name'),
   upsertItem: (row) => db('items', { method: 'POST', prefer: 'resolution=merge-duplicates,return=representation', body: JSON.stringify(row) }),
   deleteItem: (id) => db(`items?id=eq.${id}`, { method: 'DELETE', prefer: '' }),
+  // Troca o código (PK) de um item, migrando os registros vinculados nas outras tabelas
+  renameItem: async (oldId, newId, row) => {
+    await db('items', { method: 'POST', body: JSON.stringify({ ...row, id: newId }) });
+    for (const table of ['inbound_log', 'outbound_log', 'sc_map', 'reforma_perfis']) {
+      await db(`${table}?item_id=eq.${oldId}`, { method: 'PATCH', prefer: '', body: JSON.stringify({ item_id: newId }) });
+    }
+    await db(`items?id=eq.${oldId}`, { method: 'DELETE', prefer: '' });
+  },
 
   // CATEGORIES
   getCategories:   () => db('categories?order=name'),
@@ -494,8 +502,29 @@ export default function InventoryApp() {
     setSaving(true);
     try {
       if (editingItem) {
-        await api.upsertItem(itemToRow(newItem));
-        setItems(prev => prev.map(i => i.id === editingItem.id ? { ...newItem, minStock: Number(newItem.minStock), maxStock: Number(newItem.maxStock) } : i));
+        const idChanged = newItem.id !== editingItem.id;
+        if (idChanged && items.some(i => i.id === newItem.id)) {
+          showToast('Este código já está em uso por outro item.', 'error');
+          setSaving(false);
+          return;
+        }
+        if (idChanged) {
+          const oldId = editingItem.id;
+          await api.renameItem(oldId, newItem.id, itemToRow(newItem));
+          setInboundLog(prev => prev.map(r => r.itemId === oldId ? { ...r, itemId: newItem.id } : r));
+          setOutboundLog(prev => prev.map(r => r.itemId === oldId ? { ...r, itemId: newItem.id } : r));
+          setScMap(prev => {
+            if (!prev[oldId]) return prev;
+            const u = { ...prev };
+            u[newItem.id] = { ...u[oldId], itemId: newItem.id };
+            delete u[oldId];
+            return u;
+          });
+          setItems(prev => prev.map(i => i.id === oldId ? { ...newItem, minStock: Number(newItem.minStock), maxStock: Number(newItem.maxStock) } : i));
+        } else {
+          await api.upsertItem(itemToRow(newItem));
+          setItems(prev => prev.map(i => i.id === editingItem.id ? { ...newItem, minStock: Number(newItem.minStock), maxStock: Number(newItem.maxStock) } : i));
+        }
         setEditingItem(null);
         showToast('Item atualizado!');
       } else {
@@ -1414,8 +1443,7 @@ export default function InventoryApp() {
                       <div className="col-span-2">
                         <Field label="Código / ID (Código de Barras)">
                           <Input autoFocus mono type="text" required placeholder="Ex: 78910001"
-                            value={newItem.id} onChange={e => setNewItem({ ...newItem, id: e.target.value })}
-                            disabled={!!editingItem} className={editingItem ? 'opacity-50 cursor-not-allowed' : ''} />
+                            value={newItem.id} onChange={e => setNewItem({ ...newItem, id: e.target.value })} />
                         </Field>
                       </div>
                       <div>
