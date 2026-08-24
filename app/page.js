@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Reformas from '../components/Reformas';
 import Etiquetas from '../components/Etiquetas';
+import ContagemSemanal from '../components/ContagemSemanal';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG
@@ -862,6 +863,7 @@ export default function InventoryApp() {
     { id: 'sc',       icon: '🛒', label: `SC Compra (${Object.keys(scMap).length})`,     activeColor: 'bg-purple-600'  },
     { id: 'reformas', icon: '🛠️', label: 'Reformas', activeColor: 'bg-indigo-600' },
     { id: 'etiquetas', icon: '🏷️', label: 'Etiquetas', activeColor: 'bg-teal-600' },
+    { id: 'contagem', icon: '🔢', label: 'Contagem Semanal', activeColor: 'bg-cyan-700' },
     { id: 'reports',  icon: '📊', label: 'Relatórios',                                   activeColor: 'bg-slate-700'   },
     { id: 'register', icon: '➕', label: editingItem ? 'Editando' : 'Cadastrar',         activeColor: 'bg-slate-600'   },
     { id: 'inbound',  icon: '📥', label: 'Entrada',                                      activeColor: 'bg-emerald-700' },
@@ -1607,6 +1609,9 @@ export default function InventoryApp() {
 
               {/* ── ETIQUETAS ── */}
               {activeTab === 'etiquetas' && <Etiquetas />}
+
+              {/* ── CONTAGEM SEMANAL ── */}
+              {activeTab === 'contagem' && <ContagemSemanal />}
             </>
           )}
         </div>
