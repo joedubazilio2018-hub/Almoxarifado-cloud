@@ -1,5 +1,17 @@
 export function fmtDate(iso) {
   if (!iso) return '—';
+
+  // Datas no formato "AAAA-MM-DD" (vindas de <input type="date">) não podem
+  // passar por `new Date(iso)` direto: o JS interpreta isso como meia-noite
+  // em UTC, e ao converter pra horário local (Brasil, UTC-3) o dia "volta"
+  // pro dia anterior. Por isso montamos a data manualmente, em horário local.
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (match) {
+    const [, y, m, d] = match;
+    const local = new Date(Number(y), Number(m) - 1, Number(d));
+    return isNaN(local) ? '—' : local.toLocaleDateString('pt-BR');
+  }
+
   const d = new Date(iso);
   return isNaN(d) ? '—' : d.toLocaleDateString('pt-BR');
 }
