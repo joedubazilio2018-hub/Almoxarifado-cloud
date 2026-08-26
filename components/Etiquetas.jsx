@@ -76,6 +76,7 @@ export default function Etiquetas() {
   const [status, setStatus]           = useState('');
   const [queue, setQueue]             = useState([]);
   const [showPrint, setShowPrint]     = useState(false);
+  const [editingId, setEditingId]     = useState(null);
 
   // ── Vínculo com Reformas (só leitura: nº da reforma + cliente) ──
   const [reformasList, setReformasList]         = useState([]);
@@ -141,24 +142,64 @@ export default function Etiquetas() {
 
     if (fields.length === 0 && !includeStatus) return;
 
-    setQueue(prev => [
-      ...prev,
-      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, fields, includeStatus, status },
-    ]);
+    if (editingId) {
+      // Salva as alterações na etiqueta existente, sem mudar a posição dela na fila.
+      setQueue(prev => prev.map(q =>
+        q.id === editingId ? { ...q, fields, includeStatus, status } : q
+      ));
+      setEditingId(null);
+    } else {
+      setQueue(prev => [
+        ...prev,
+        { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, fields, includeStatus, status },
+      ]);
+    }
 
     // Mantém os campos marcados (mesma estrutura) mas limpa os valores,
     // pra facilitar preencher a próxima etiqueta igual.
     setValues(emptyValues());
+    setIncluded(emptyIncluded());
+    setIncludeStatus(false);
+    setStatus('');
+    setSelectedReformaId('');
+  }
+
+  function handleEdit(id) {
+    const item = queue.find(q => q.id === id);
+    if (!item) return;
+
+    const nextIncluded = emptyIncluded();
+    const nextValues   = emptyValues();
+    item.fields.forEach(f => {
+      nextIncluded[f.key] = true;
+      nextValues[f.key]   = f.value;
+    });
+
+    setIncluded(nextIncluded);
+    setValues(nextValues);
+    setIncludeStatus(item.includeStatus);
+    setStatus(item.status || '');
+    setSelectedReformaId(''); // edição manual; se quiser revincular, escolhe de novo
+    setEditingId(id);
+  }
+
+  function handleCancelEdit() {
+    setEditingId(null);
+    setValues(emptyValues());
+    setIncluded(emptyIncluded());
+    setIncludeStatus(false);
     setStatus('');
     setSelectedReformaId('');
   }
 
   function handleRemove(id) {
     setQueue(prev => prev.filter(q => q.id !== id));
+    if (editingId === id) handleCancelEdit();
   }
 
   function handleClearQueue() {
     setQueue([]); // o useEffect acima já sincroniza isso com o localStorage
+    setEditingId(null);
   }
 
   return (
@@ -214,6 +255,11 @@ export default function Etiquetas() {
 
       {/* ── Formulário ── */}
       <div className="bg-white rounded-2xl border border-slate-200 p-5">
+        {editingId && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700">
+            ✏️ Editando etiqueta — ajuste os campos abaixo e clique em "Salvar edição".
+          </div>
+        )}
         <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">
           Campos desta etiqueta {selectedCount > 0 && <span className="text-indigo-500">({selectedCount} selecionado{selectedCount > 1 ? 's' : ''})</span>}
         </p>
@@ -286,13 +332,25 @@ export default function Etiquetas() {
           )}
         </div>
 
-        <button
-          onClick={handleAdd}
-          disabled={selectedCount === 0 && !includeStatus}
-          className="mt-4 w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg text-sm font-bold transition"
-        >
-          + Adicionar à fila de impressão
-        </button>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            onClick={handleAdd}
+            disabled={selectedCount === 0 && !includeStatus}
+            className={`px-5 py-2.5 text-white rounded-lg text-sm font-bold transition disabled:bg-slate-200 disabled:text-slate-400 ${
+              editingId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
+            }`}
+          >
+            {editingId ? '✓ Salvar edição' : '+ Adicionar à fila de impressão'}
+          </button>
+          {editingId && (
+            <button
+              onClick={handleCancelEdit}
+              className="px-5 py-2.5 border border-slate-200 text-slate-500 rounded-lg text-sm font-bold hover:border-red-300 hover:text-red-500 transition"
+            >
+              Cancelar edição
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Fila ── */}
@@ -313,7 +371,9 @@ export default function Etiquetas() {
         ) : (
           <div className="space-y-2 mb-4">
             {queue.map((q, idx) => (
-              <div key={q.id} className="flex items-center justify-between gap-3 border border-slate-100 rounded-lg px-3 py-2">
+              <div key={q.id} className={`flex items-center justify-between gap-3 border rounded-lg px-3 py-2 ${
+                editingId === q.id ? 'border-emerald-300 bg-emerald-50' : 'border-slate-100'
+              }`}>
                 <p className="text-xs text-slate-600 truncate">
                   <span className="font-bold text-slate-400 mr-2">#{idx + 1}</span>
                   {q.fields.length > 0
@@ -325,9 +385,14 @@ export default function Etiquetas() {
                     </span>
                   )}
                 </p>
-                <button onClick={() => handleRemove(q.id)} className="shrink-0 text-slate-300 hover:text-red-500 transition text-lg leading-none">
-                  ×
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button onClick={() => handleEdit(q.id)} className="text-slate-400 hover:text-indigo-600 transition text-xs font-bold">
+                    ✏️ Editar
+                  </button>
+                  <button onClick={() => handleRemove(q.id)} className="text-slate-300 hover:text-red-500 transition text-lg leading-none">
+                    ×
+                  </button>
+                </div>
               </div>
             ))}
           </div>
