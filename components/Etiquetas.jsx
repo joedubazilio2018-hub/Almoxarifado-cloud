@@ -1,6 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { PrintCheckbox } from './printUtils';
+import { PrintCheckbox, fmtDate } from './printUtils';
+
+const QUEUE_STORAGE_KEY = 'etiquetas-fila-impressao';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG (mesmo projeto do page.js / Reformas.jsx)
@@ -88,6 +90,25 @@ export default function Etiquetas() {
       .finally(() => setLoadingReformas(false));
   }, []);
 
+  // Restaura a fila salva (se o usuário atualizar a página ou sair e voltar).
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(QUEUE_STORAGE_KEY);
+      if (saved) setQueue(JSON.parse(saved));
+    } catch (e) {
+      console.error('Não foi possível restaurar a fila de etiquetas:', e);
+    }
+  }, []);
+
+  // Salva a fila a cada mudança, pra não perder nada em refresh/saída.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
+    } catch (e) {
+      console.error('Não foi possível salvar a fila de etiquetas:', e);
+    }
+  }, [queue]);
+
   const isLinked = selectedReformaId !== '';
 
   function handleSelectReforma(id) {
@@ -116,7 +137,7 @@ export default function Etiquetas() {
   function handleAdd() {
     const fields = FIELD_DEFS
       .filter(f => included[f.key])
-      .map(f => ({ key: f.key, label: f.label, value: values[f.key] }));
+      .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
 
     if (fields.length === 0 && !includeStatus) return;
 
@@ -137,7 +158,7 @@ export default function Etiquetas() {
   }
 
   function handleClearQueue() {
-    setQueue([]);
+    setQueue([]); // o useEffect acima já sincroniza isso com o localStorage
   }
 
   return (
@@ -296,7 +317,7 @@ export default function Etiquetas() {
                 <p className="text-xs text-slate-600 truncate">
                   <span className="font-bold text-slate-400 mr-2">#{idx + 1}</span>
                   {q.fields.length > 0
-                    ? q.fields.map(f => `${f.label}: ${f.value || '—'}`).join('  ·  ')
+                    ? q.fields.map(f => `${f.label}: ${f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '—')}`).join('  ·  ')
                     : '(sem campos de texto)'}
                   {q.includeStatus && (
                     <span className="ml-2 text-indigo-500 font-semibold">
@@ -360,7 +381,9 @@ function PrintEtiquetas({ queue, onClose }) {
                   {q.fields.length > 0 ? q.fields.map(f => (
                     <p key={f.key} className="text-sm leading-snug">
                       <span className="font-bold text-slate-800">{f.label.toUpperCase()}:</span>{' '}
-                      <span className="text-slate-700">{f.value || ''}</span>
+                      <span className="text-slate-700">
+                        {f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '')}
+                      </span>
                     </p>
                   )) : (
                     <p className="text-xs text-slate-300">—</p>
