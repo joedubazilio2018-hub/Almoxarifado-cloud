@@ -59,6 +59,8 @@ const api = {
   // OUTBOUND
   getOutbound:    () => db('outbound_log?order=date.desc'),
   insertOutbound: (row) => db('outbound_log', { method: 'POST', body: JSON.stringify(row) }),
+  // Insere várias linhas de saída (um lote/lançamento) em uma única requisição HTTP
+  insertOutboundBatch: (rows) => db('outbound_log', { method: 'POST', body: JSON.stringify(rows) }),
 
   // SC MAP
   getScMap:   () => db('sc_map'),
@@ -108,7 +110,7 @@ function rowToInbound(r) {
   return { id: r.id, itemId: r.item_id, qty: r.qty, date: r.date, sc: r.sc };
 }
 function rowToOutbound(r) {
-  return { id: r.id, itemId: r.item_id, qty: r.qty, date: r.date, notes: r.notes };
+  return { id: r.id, itemId: r.item_id, qty: r.qty, date: r.date, notes: r.notes, retiradoPor: r.retirado_por || '', loteId: r.lote_id || null };
 }
 function rowToSc(r) {
   return { itemId: r.item_id, sc: r.sc, qty: r.qty, dateSc: r.date_sc, dateEta: r.date_eta };
@@ -318,7 +320,12 @@ export default function InventoryApp() {
 
   const [newItem, setNewItem] = useState({ id: '', name: '', location: '', application: '', unit: 'Un', minStock: '', maxStock: '', categoryId: null });
   const [newInbound,  setNewInbound]  = useState({ itemId: '', qty: '', date: today(), sc: '' });
-  const [newOutbound, setNewOutbound] = useState({ itemId: '', qty: '', date: today(), notes: '' });
+  const [newOutbound, setNewOutbound] = useState({
+    date: today(),
+    retiradoPor: '',
+    notes: '',
+    items: [{ itemId: '', qty: '' }],
+  });
   const [receivingSc, setReceivingSc] = useState(null);
   const [receiveQty,  setReceiveQty]  = useState('');
   const [newSc, setNewSc] = useState({ itemId: '', sc: '', qty: '', dateSc: today(), dateEta: '' });
@@ -443,7 +450,7 @@ export default function InventoryApp() {
       .map(r => ({ type: 'Entrada', qty: r.qty, date: r.date, sc: r.sc }));
     const outbound = outboundLog
       .filter(r => r.itemId === itemId)
-      .map(r => ({ type: 'Saída', qty: r.qty, date: r.date, notes: r.notes }));
+      .map(r => ({ type: 'Saída', qty: r.qty, date: r.date, notes: r.notes, retiradoPor: r.retiradoPor }));
     return [...inbound, ...outbound]
       .sort((a, b) => new Date(b.date) - new Date(a.date))
       .slice(0, 5);
@@ -579,19 +586,67 @@ export default function InventoryApp() {
     }
   };
 
+  /* ── Lote de saída: linhas de item dinâmicas ── */
+  const addOutboundRow = () => {
+    setNewOutbound(prev => ({ ...prev, items: [...prev.items, { itemId: '', qty: '' }] }));
+  };
+  const removeOutboundRow = (index) => {
+    setNewOutbound(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
+  };
+  const updateOutboundRow = (index, field, value) => {
+    setNewOutbound(prev => ({
+      ...prev,
+      items: prev.items.map((row, i) => i === index ? { ...row, [field]: value } : row),
+    }));
+  };
+  // Estoque disponível para uma linha, descontando o que já foi alocado ao mesmo item em outras linhas do lote atual
+  const getAvailableForRow = useCallback((itemId, currentIndex) => {
+    if (!itemId) return null;
+    const usedElsewhere = newOutbound.items.reduce((sum, row, i) => {
+      if (i === currentIndex || row.itemId !== itemId) return sum;
+      return sum + (Number(row.qty) || 0);
+    }, 0);
+    return getQty(itemId) - usedElsewhere;
+  }, [newOutbound.items, getQty]);
+
   const handleOutbound = async (e) => {
     e.preventDefault();
-    if (!newOutbound.itemId || !newOutbound.qty) return showToast('Selecione o item e a quantidade.', 'error');
-    const available = getQty(newOutbound.itemId);
-    if (Number(newOutbound.qty) > available) return showToast(`Estoque insuficiente! Disponível: ${available} un.`, 'error');
+
+    if (!newOutbound.date) return showToast('Informe a data da retirada.', 'error');
+    if (!newOutbound.retiradoPor.trim()) return showToast('Informe quem retirou o material.', 'error');
+
+    const validRows = newOutbound.items.filter(r => r.itemId && r.qty);
+    if (validRows.length === 0) return showToast('Adicione ao menos um item com quantidade.', 'error');
+
+    // Valida estoque somando quantidades repetidas do mesmo item dentro do próprio lote
+    const totalsByItem = {};
+    for (const row of validRows) {
+      totalsByItem[row.itemId] = (totalsByItem[row.itemId] || 0) + Number(row.qty);
+    }
+    for (const [itemId, totalQty] of Object.entries(totalsByItem)) {
+      const available = getQty(itemId);
+      if (totalQty > available) {
+        const name = items.find(i => i.id === itemId)?.name || itemId;
+        return showToast(`Estoque insuficiente de "${name}"! Disponível: ${available} un.`, 'error');
+      }
+    }
+
     setSaving(true);
     try {
-      const row = { id: `OUT-${Date.now()}`, item_id: newOutbound.itemId, qty: Number(newOutbound.qty), date: newOutbound.date, notes: newOutbound.notes };
-      await api.insertOutbound(row);
-      setOutboundLog(prev => [...prev, rowToOutbound(row)]);
-      const name = items.find(i => i.id === newOutbound.itemId)?.name;
-      setNewOutbound({ itemId: '', qty: '', date: today(), notes: '' });
-      showToast(`Saída de "${name}" confirmada!`);
+      const loteId = `LOTE-${Date.now()}`;
+      const rows = validRows.map((row, idx) => ({
+        id: `OUT-${Date.now()}-${idx}`,
+        item_id: row.itemId,
+        qty: Number(row.qty),
+        date: newOutbound.date,
+        notes: newOutbound.notes,
+        retirado_por: newOutbound.retiradoPor.trim(),
+        lote_id: loteId,
+      }));
+      await api.insertOutboundBatch(rows);
+      setOutboundLog(prev => [...prev, ...rows.map(rowToOutbound)]);
+      setNewOutbound({ date: today(), retiradoPor: '', notes: '', items: [{ itemId: '', qty: '' }] });
+      showToast(`Saída registrada: ${rows.length} ${rows.length === 1 ? 'item' : 'itens'}!`);
     } catch { showToast('Erro ao registrar saída.', 'error'); }
     finally { setSaving(false); }
   };
@@ -1034,6 +1089,9 @@ export default function InventoryApp() {
                                                       </div>
                                                       {mov.type === 'Entrada' && mov.sc && (
                                                         <span className="text-[11px] text-blue-600 font-mono pl-6">🛒 SC: {mov.sc}</span>
+                                                      )}
+                                                      {mov.type === 'Saída' && mov.retiradoPor && (
+                                                        <span className="text-[11px] text-slate-500 pl-6">🙋 Retirado por: <span className="font-semibold">{mov.retiradoPor}</span></span>
                                                       )}
                                                       {mov.type === 'Saída' && mov.notes && (
                                                         <span className="text-[11px] text-slate-500 italic pl-6">📝 {mov.notes}</span>
@@ -1576,26 +1634,55 @@ export default function InventoryApp() {
                 <div className="max-w-lg mx-auto space-y-5">
                   <div>
                     <h1 className="text-xl font-bold text-rose-800">Registrar Saída / Consumo</h1>
-                    <p className="text-slate-400 text-xs mt-0.5">Deduz do saldo atual do estoque</p>
+                    <p className="text-slate-400 text-xs mt-0.5">Um único lançamento para todos os itens de uma mesma requisição</p>
                   </div>
                   <form onSubmit={handleOutbound} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-                    <Field label="Selecionar Item">
-                      <ItemSearchSelect items={items} value={newOutbound.itemId}
-                        onChange={v => setNewOutbound({ ...newOutbound, itemId: v })}
-                        getQty={getQty} showStock={true} ringColor="rose" />
-                    </Field>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="Quantidade Retirada">
-                        <Input ringColor="rose" type="number" required min="1" placeholder="0"
-                          value={newOutbound.qty} onChange={e => setNewOutbound({ ...newOutbound, qty: e.target.value })} />
+                      <Field label="Retirado por">
+                        <Input ringColor="rose" type="text" required placeholder="Nome de quem retirou"
+                          value={newOutbound.retiradoPor} onChange={e => setNewOutbound({ ...newOutbound, retiradoPor: e.target.value })} />
                       </Field>
                       <Field label="Data da Retirada">
                         <Input ringColor="rose" type="date" required
                           value={newOutbound.date} onChange={e => setNewOutbound({ ...newOutbound, date: e.target.value })} />
                       </Field>
                     </div>
-                    <Field label="Destino / Observações">
-                      <textarea rows="3" placeholder="Ex: Entregue ao técnico João — manutenção máquina 02."
+
+                    <div className="space-y-3">
+                      <p className="text-xs font-bold text-slate-500 uppercase">Itens</p>
+                      {newOutbound.items.map((row, idx) => {
+                        const available = getAvailableForRow(row.itemId, idx);
+                        return (
+                          <div key={idx} className="flex gap-2 items-start bg-slate-50 border border-slate-200 rounded-xl p-3">
+                            <div className="flex-1 space-y-2">
+                              <ItemSearchSelect items={items} value={row.itemId}
+                                onChange={v => updateOutboundRow(idx, 'itemId', v)}
+                                getQty={getQty} showStock={true} ringColor="rose" />
+                              <div className="flex items-center gap-2">
+                                <Input ringColor="rose" type="number" required min="1" placeholder="Quantidade"
+                                  value={row.qty} onChange={e => updateOutboundRow(idx, 'qty', e.target.value)} />
+                                {row.itemId && available !== null && (
+                                  <span className={`text-[11px] font-bold shrink-0 ${available < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                                    disp. {available}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {newOutbound.items.length > 1 && (
+                              <button type="button" onClick={() => removeOutboundRow(idx)}
+                                className="mt-1 px-2 py-1 text-xs text-slate-400 hover:text-red-500 font-bold transition">✕</button>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <button type="button" onClick={addOutboundRow}
+                        className="w-full py-2 border border-dashed border-rose-300 text-rose-600 text-sm font-semibold rounded-xl hover:bg-rose-50 transition">
+                        + Adicionar outro item
+                      </button>
+                    </div>
+
+                    <Field label="Observações (opcional)">
+                      <textarea rows="2" placeholder="Ex: manutenção máquina 02."
                         value={newOutbound.notes} onChange={e => setNewOutbound({ ...newOutbound, notes: e.target.value })}
                         className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-400 transition resize-none" />
                     </Field>
