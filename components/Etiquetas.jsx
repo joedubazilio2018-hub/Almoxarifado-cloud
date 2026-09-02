@@ -1,23 +1,22 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { PrintCheckbox, fmtDate } from './printUtils';
-
-const QUEUE_STORAGE_KEY = 'etiquetas-fila-impressao';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG (mesmo projeto do page.js / Reformas.jsx)
-   Só leitura aqui — Etiquetas nunca escreve na tabela reformas.
 ───────────────────────────────────────────── */
 const SUPA_URL = 'https://ujvaietlkqjwjfqtxoxn.supabase.co';
 const SUPA_KEY = 'sb_publishable_vrT8lrS0PBmL0LGbuBQPrg_jGNtO6wW';
 
-async function db(path) {
+async function db(path, opts = {}) {
   const res = await fetch(`${SUPA_URL}/rest/v1/${path}`, {
     headers: {
       apikey: SUPA_KEY,
       Authorization: `Bearer ${SUPA_KEY}`,
       'Content-Type': 'application/json',
+      Prefer: opts.prefer || 'return=representation',
     },
+    ...opts,
   });
   if (!res.ok) {
     const errText = await res.text();
@@ -31,6 +30,16 @@ async function db(path) {
 const reformasApi = {
   // Só os campos que interessam aqui: nº da reforma, cliente e status (pra identificar na lista)
   getReformas: () => db('reformas?select=id,reforma,cliente,status,created_at&order=created_at.desc'),
+};
+
+// Fila de etiquetas: agora vive no Supabase (tabela etiquetas_fila), compartilhada
+// entre celular e computador. Antes ficava só em localStorage, por isso não sincronizava.
+const filaApi = {
+  getFila:        () => db('etiquetas_fila?order=created_at.asc'),
+  insertFila:     (row) => db('etiquetas_fila', { method: 'POST', body: JSON.stringify(row) }),
+  updateFila:     (id, row) => db(`etiquetas_fila?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(row) }),
+  deleteFila:     (id) => db(`etiquetas_fila?id=eq.${id}`, { method: 'DELETE', prefer: '' }),
+  deleteFilaIds:  (ids) => db(`etiquetas_fila?id=in.(${ids.join(',')})`, { method: 'DELETE', prefer: '' }),
 };
 
 const STATUS_LABEL = {
@@ -75,6 +84,9 @@ export default function Etiquetas() {
   const [includeStatus, setIncludeStatus] = useState(false);
   const [status, setStatus]           = useState('');
   const [queue, setQueue]             = useState([]);
+  const [loadingQueue, setLoadingQueue] = useState(true);
+  const [queueError, setQueueError]   = useState(false);
+  const [savingQueue, setSavingQueue] = useState(false);
   const [showPrint, setShowPrint]     = useState(false);
   const [editingId, setEditingId]     = useState(null);
 
@@ -91,24 +103,19 @@ export default function Etiquetas() {
       .finally(() => setLoadingReformas(false));
   }, []);
 
-  // Restaura a fila salva (se o usuário atualizar a página ou sair e voltar).
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(QUEUE_STORAGE_KEY);
-      if (saved) setQueue(JSON.parse(saved));
-    } catch (e) {
-      console.error('Não foi possível restaurar a fila de etiquetas:', e);
-    }
+  // Fila compartilhada: carrega do Supabase (não mais do localStorage).
+  const loadQueue = useCallback(() => {
+    setLoadingQueue(true);
+    setQueueError(false);
+    return filaApi.getFila()
+      .then(rows => setQueue(rows.map(r => ({
+        id: r.id, fields: r.fields || [], includeStatus: r.include_status, status: r.status || '',
+      }))))
+      .catch(() => setQueueError(true))
+      .finally(() => setLoadingQueue(false));
   }, []);
 
-  // Salva a fila a cada mudança, pra não perder nada em refresh/saída.
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
-    } catch (e) {
-      console.error('Não foi possível salvar a fila de etiquetas:', e);
-    }
-  }, [queue]);
+  useEffect(() => { loadQueue(); }, [loadQueue]);
 
   const isLinked = selectedReformaId !== '';
 
@@ -135,33 +142,43 @@ export default function Etiquetas() {
 
   const selectedCount = FIELD_DEFS.filter(f => included[f.key]).length;
 
-  function handleAdd() {
+  async function handleAdd() {
     const fields = FIELD_DEFS
       .filter(f => included[f.key])
       .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
 
     if (fields.length === 0 && !includeStatus) return;
 
-    if (editingId) {
-      // Salva as alterações na etiqueta existente, sem mudar a posição dela na fila.
-      setQueue(prev => prev.map(q =>
-        q.id === editingId ? { ...q, fields, includeStatus, status } : q
-      ));
-      setEditingId(null);
-    } else {
-      setQueue(prev => [
-        ...prev,
-        { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, fields, includeStatus, status },
-      ]);
-    }
+    setSavingQueue(true);
+    try {
+      if (editingId) {
+        await filaApi.updateFila(editingId, { fields, include_status: includeStatus, status });
+        setQueue(prev => prev.map(q =>
+          q.id === editingId ? { ...q, fields, includeStatus, status } : q
+        ));
+        setEditingId(null);
+      } else {
+        const row = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          fields, include_status: includeStatus, status,
+        };
+        await filaApi.insertFila(row);
+        setQueue(prev => [...prev, { id: row.id, fields, includeStatus, status }]);
+      }
 
-    // Mantém os campos marcados (mesma estrutura) mas limpa os valores,
-    // pra facilitar preencher a próxima etiqueta igual.
-    setValues(emptyValues());
-    setIncluded(emptyIncluded());
-    setIncludeStatus(false);
-    setStatus('');
-    setSelectedReformaId('');
+      // Mantém os campos marcados (mesma estrutura) mas limpa os valores,
+      // pra facilitar preencher a próxima etiqueta igual.
+      setValues(emptyValues());
+      setIncluded(emptyIncluded());
+      setIncludeStatus(false);
+      setStatus('');
+      setSelectedReformaId('');
+    } catch (e) {
+      console.error('Erro ao salvar etiqueta na fila:', e);
+      alert('Não foi possível salvar a etiqueta agora. Verifique sua conexão e tente de novo.');
+    } finally {
+      setSavingQueue(false);
+    }
   }
 
   function handleEdit(id) {
@@ -192,14 +209,32 @@ export default function Etiquetas() {
     setSelectedReformaId('');
   }
 
-  function handleRemove(id) {
+  async function handleRemove(id) {
+    const prevQueue = queue;
     setQueue(prev => prev.filter(q => q.id !== id));
     if (editingId === id) handleCancelEdit();
+    try {
+      await filaApi.deleteFila(id);
+    } catch (e) {
+      console.error('Erro ao remover etiqueta:', e);
+      setQueue(prevQueue); // desfaz a remoção local se a chamada falhar
+      alert('Não foi possível remover a etiqueta agora. Verifique sua conexão e tente de novo.');
+    }
   }
 
-  function handleClearQueue() {
-    setQueue([]); // o useEffect acima já sincroniza isso com o localStorage
+  async function handleClearQueue() {
+    if (queue.length === 0) return;
+    const ids = queue.map(q => q.id);
+    const prevQueue = queue;
+    setQueue([]);
     setEditingId(null);
+    try {
+      await filaApi.deleteFilaIds(ids);
+    } catch (e) {
+      console.error('Erro ao limpar fila:', e);
+      setQueue(prevQueue);
+      alert('Não foi possível limpar a fila agora. Verifique sua conexão e tente de novo.');
+    }
   }
 
   return (
@@ -335,12 +370,12 @@ export default function Etiquetas() {
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             onClick={handleAdd}
-            disabled={selectedCount === 0 && !includeStatus}
+            disabled={(selectedCount === 0 && !includeStatus) || savingQueue}
             className={`px-5 py-2.5 text-white rounded-lg text-sm font-bold transition disabled:bg-slate-200 disabled:text-slate-400 ${
               editingId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
             }`}
           >
-            {editingId ? '✓ Salvar edição' : '+ Adicionar à fila de impressão'}
+            {savingQueue ? 'Salvando...' : editingId ? '✓ Salvar edição' : '+ Adicionar à fila de impressão'}
           </button>
           {editingId && (
             <button
@@ -359,14 +394,28 @@ export default function Etiquetas() {
           <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
             Fila de etiquetas ({queue.length})
           </p>
-          {queue.length > 0 && (
-            <button onClick={handleClearQueue} className="text-xs font-semibold text-slate-400 hover:text-red-500 transition">
-              Limpar tudo
+          <div className="flex items-center gap-3">
+            <button onClick={loadQueue} disabled={loadingQueue}
+              className="text-xs font-semibold text-indigo-500 hover:text-indigo-700 disabled:text-slate-300 transition">
+              {loadingQueue ? 'Atualizando...' : '🔄 Atualizar'}
             </button>
-          )}
+            {queue.length > 0 && (
+              <button onClick={handleClearQueue} className="text-xs font-semibold text-slate-400 hover:text-red-500 transition">
+                Limpar tudo
+              </button>
+            )}
+          </div>
         </div>
 
-        {queue.length === 0 ? (
+        {queueError && (
+          <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+            Não foi possível carregar a fila agora. Verifique sua conexão e clique em "Atualizar".
+          </p>
+        )}
+
+        {loadingQueue ? (
+          <p className="text-sm text-slate-300 py-4 text-center">Carregando fila...</p>
+        ) : queue.length === 0 ? (
           <p className="text-sm text-slate-300 py-4 text-center">Nenhuma etiqueta adicionada ainda.</p>
         ) : (
           <div className="space-y-2 mb-4">
