@@ -90,6 +90,13 @@ export default function Etiquetas() {
   const [showPrint, setShowPrint]     = useState(false);
   const [editingId, setEditingId]     = useState(null);
 
+  // ── Modo "vários pesos": gera uma etiqueta pra cada peso digitado,
+  // repetindo os demais campos (item, medida, NF, data, reforma, cliente...).
+  // Útil pra arames/tubos, onde cada rolo/peça tem um peso diferente
+  // mas o resto da etiqueta é idêntico. ──
+  const [multiPeso, setMultiPeso]         = useState(false);
+  const [pesosMultiplos, setPesosMultiplos] = useState('');
+
   // ── Vínculo com Reformas (só leitura: nº da reforma + cliente) ──
   const [reformasList, setReformasList]         = useState([]);
   const [loadingReformas, setLoadingReformas]   = useState(true);
@@ -143,6 +150,56 @@ export default function Etiquetas() {
   const selectedCount = FIELD_DEFS.filter(f => included[f.key]).length;
 
   async function handleAdd() {
+    // ── Modo "vários pesos": um insert por peso, mesmo restante da etiqueta ──
+    if (multiPeso && included.peso && !editingId) {
+      const pesos = pesosMultiplos
+        .split(/[\n,]+/)
+        .map(p => p.trim())
+        .filter(Boolean);
+
+      if (pesos.length === 0) {
+        alert('Digite pelo menos um peso (um por linha).');
+        return;
+      }
+
+      const pesoDef = FIELD_DEFS.find(f => f.key === 'peso');
+      const baseFields = FIELD_DEFS
+        .filter(f => included[f.key] && f.key !== 'peso')
+        .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
+
+      setSavingQueue(true);
+      try {
+        const novasEtiquetas = [];
+        for (const peso of pesos) {
+          const fields = [
+            ...baseFields,
+            { key: 'peso', label: pesoDef.label, value: peso, type: pesoDef.type },
+          ];
+          const row = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            fields, include_status: includeStatus, status,
+          };
+          await filaApi.insertFila(row);
+          novasEtiquetas.push({ id: row.id, fields, includeStatus, status });
+        }
+        setQueue(prev => [...prev, ...novasEtiquetas]);
+
+        setValues(emptyValues());
+        setIncluded(emptyIncluded());
+        setIncludeStatus(false);
+        setStatus('');
+        setSelectedReformaId('');
+        setMultiPeso(false);
+        setPesosMultiplos('');
+      } catch (e) {
+        console.error('Erro ao salvar etiquetas (vários pesos):', e);
+        alert('Não foi possível salvar todas as etiquetas agora. Verifique sua conexão, confira a fila e tente de novo com os pesos que faltarem.');
+      } finally {
+        setSavingQueue(false);
+      }
+      return;
+    }
+
     const fields = FIELD_DEFS
       .filter(f => included[f.key])
       .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
@@ -197,6 +254,8 @@ export default function Etiquetas() {
     setIncludeStatus(item.includeStatus);
     setStatus(item.status || '');
     setSelectedReformaId(''); // edição manual; se quiser revincular, escolhe de novo
+    setMultiPeso(false);
+    setPesosMultiplos('');
     setEditingId(id);
   }
 
@@ -207,6 +266,8 @@ export default function Etiquetas() {
     setIncludeStatus(false);
     setStatus('');
     setSelectedReformaId('');
+    setMultiPeso(false);
+    setPesosMultiplos('');
   }
 
   async function handleRemove(id) {
@@ -302,6 +363,7 @@ export default function Etiquetas() {
         <div className="grid sm:grid-cols-2 gap-3">
           {FIELD_DEFS.map(f => {
             const lockedByReforma = isLinked && (f.key === 'reforma' || f.key === 'cliente');
+            const isPeso = f.key === 'peso';
             return (
               <div key={f.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition ${
                 lockedByReforma
@@ -318,19 +380,56 @@ export default function Etiquetas() {
                   {f.label}
                   {lockedByReforma && <span title="Vinculado à reforma selecionada">🔗</span>}
                 </label>
+                {isPeso && included.peso && !editingId ? (
+                  <button
+                    type="button"
+                    onClick={() => setMultiPeso(v => !v)}
+                    className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-md border transition mr-1 ${
+                      multiPeso
+                        ? 'bg-amber-500 border-amber-500 text-white'
+                        : 'bg-white border-slate-200 text-slate-400 hover:border-amber-300 hover:text-amber-600'
+                    }`}
+                    title="Gerar uma etiqueta pra cada peso, repetindo o resto dos campos"
+                  >
+                    ⚖️ Vários pesos
+                  </button>
+                ) : null}
                 <input
                   type={f.type}
                   value={values[f.key]}
                   onChange={(e) => setValue(f.key, e.target.value)}
-                  disabled={!included[f.key]}
+                  disabled={!included[f.key] || (isPeso && multiPeso)}
                   readOnly={lockedByReforma}
-                  placeholder={f.type === 'text' ? f.label : ''}
+                  placeholder={isPeso && multiPeso ? 'defina os pesos abaixo' : (f.type === 'text' ? f.label : '')}
                   className={`flex-1 min-w-0 text-sm bg-transparent outline-none disabled:text-slate-300 ${lockedByReforma ? 'text-emerald-700 font-semibold' : ''}`}
                 />
               </div>
             );
           })}
         </div>
+
+        {multiPeso && included.peso && !editingId && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3">
+            <p className="text-xs font-bold text-amber-700 mb-1">
+              ⚖️ Vários pesos — um por linha (ou separados por vírgula)
+            </p>
+            <p className="text-[11px] text-amber-600 mb-2">
+              Os demais campos marcados acima (item, medida, NF, data, reforma, cliente...) serão repetidos em cada etiqueta. Só o peso muda.
+            </p>
+            <textarea
+              value={pesosMultiplos}
+              onChange={(e) => setPesosMultiplos(e.target.value)}
+              placeholder={'Ex:\n12,5\n13,0\n11,8'}
+              rows={4}
+              className="w-full text-sm border border-amber-200 rounded-lg px-3 py-2 bg-white outline-none focus:border-amber-400"
+            />
+            {pesosMultiplos.trim() && (
+              <p className="text-[11px] text-amber-700 font-semibold mt-1">
+                {pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean).length} etiqueta(s) serão geradas.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Carimbo de status */}
         <div className="mt-4 pt-4 border-t border-slate-100">
@@ -370,12 +469,22 @@ export default function Etiquetas() {
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             onClick={handleAdd}
-            disabled={(selectedCount === 0 && !includeStatus) || savingQueue}
+            disabled={
+              (selectedCount === 0 && !includeStatus) ||
+              savingQueue ||
+              (multiPeso && included.peso && !editingId && pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean).length === 0)
+            }
             className={`px-5 py-2.5 text-white rounded-lg text-sm font-bold transition disabled:bg-slate-200 disabled:text-slate-400 ${
               editingId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
             }`}
           >
-            {savingQueue ? 'Salvando...' : editingId ? '✓ Salvar edição' : '+ Adicionar à fila de impressão'}
+            {savingQueue
+              ? 'Salvando...'
+              : editingId
+              ? '✓ Salvar edição'
+              : multiPeso && included.peso
+              ? `+ Adicionar ${pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean).length || ''} etiqueta(s) à fila`
+              : '+ Adicionar à fila de impressão'}
           </button>
           {editingId && (
             <button
@@ -461,6 +570,16 @@ export default function Etiquetas() {
   );
 }
 
+/* Quanto menos campos a etiqueta tiver, maior a fonte — pra preencher bem
+   o espaço de 14x6cm em vez de deixar tudo grudado e pequeno no topo. */
+function fieldTextSizeClass(count) {
+  if (count <= 2) return 'text-2xl';
+  if (count === 3) return 'text-xl';
+  if (count === 4) return 'text-lg';
+  if (count <= 6) return 'text-sm';
+  return 'text-xs';
+}
+
 /* ─────────────────────────────────────────────
    FOLHA DE ETIQUETAS — pronta pra imprimir, recortar e colar
    Cada etiqueta sai com 14cm x 6cm.
@@ -491,9 +610,11 @@ function PrintEtiquetas({ queue, onClose }) {
                 style={{ width: '14cm', height: '6cm' }}
                 className="border-2 border-slate-800 rounded-md p-3 flex flex-col justify-between break-inside-avoid print:break-inside-avoid"
               >
-                <div className="space-y-1 overflow-hidden">
+                <div className={`flex-1 flex flex-col overflow-hidden ${
+                  q.fields.length > 1 ? 'justify-evenly' : 'justify-center'
+                }`}>
                   {q.fields.length > 0 ? q.fields.map(f => (
-                    <p key={f.key} className="text-sm leading-snug">
+                    <p key={f.key} className={`${fieldTextSizeClass(q.fields.length)} leading-snug`}>
                       <span className="font-bold text-slate-800">{f.label.toUpperCase()}:</span>{' '}
                       <span className="text-slate-700">
                         {f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '')}
