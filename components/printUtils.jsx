@@ -18,19 +18,17 @@ export function fmtDate(iso) {
 
 /* Quadradinho de check impresso — não é um <input>, é só o desenho do
    quadrado, pra imprimir de forma consistente e ser marcado à caneta
-   (ou já vir preenchido quando o status é escolhido no sistema). */
+   (ou já vir preenchido quando o status é escolhido no sistema).
+   Usa um "X" de texto em vez de quadrado preenchido (background-color)
+   porque a maioria dos navegadores não imprime cor de fundo por padrão
+   — só cor de texto/borda —, então o preenchimento sumia no papel. */
 export function PrintCheckbox({ size = 16, checked = false }) {
   return (
     <span
-      style={{ width: size, height: size }}
-      className="relative inline-flex items-center justify-center shrink-0 border-2 border-slate-800 align-middle"
+      style={{ width: size, height: size, lineHeight: `${size}px`, fontSize: size * 0.85 }}
+      className="relative inline-flex items-center justify-center shrink-0 border-2 border-slate-800 align-middle font-bold text-slate-900"
     >
-      {checked && (
-        <span
-          style={{ width: size * 0.6, height: size * 0.6 }}
-          className="bg-slate-800"
-        />
-      )}
+      {checked ? 'X' : ''}
     </span>
   );
 }
