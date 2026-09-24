@@ -104,6 +104,23 @@ function parsePesosLista(str) {
   return String(str || '').split(/[\s;]+/).map(p => p.trim()).filter(Boolean);
 }
 
+// Na exibição (lista da fila e impressão), a medida aparece colada ao nome do item
+// (ex: "Arame 9,5") em vez de numa linha separada. Só junta quando os dois campos existem;
+// se o Item não estiver marcado, a Medida continua saindo sozinha. Os dados salvos
+// não mudam (item e medida seguem separados), então os totais por medida continuam funcionando.
+function camposParaExibir(fields) {
+  const item   = fields.find(f => f.key === 'item');
+  const medida = fields.find(f => f.key === 'medida');
+  if (!item || !medida) return fields;
+  const junto = [item.value, medida.value]
+    .map(v => String(v || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  return fields
+    .filter(f => f.key !== 'medida')
+    .map(f => f.key === 'item' ? { ...f, value: junto } : f);
+}
+
 function novoCard(id) {
   return { id: id || `c${Date.now()}`, medida: '', pesos: '' };
 }
@@ -582,7 +599,7 @@ export default function Etiquetas() {
                     type="text"
                     value={activeCard.medida}
                     onChange={(e) => updateCard(activeCard.id, { medida: e.target.value })}
-                    placeholder="ex: 9,5mm"
+                    placeholder="ex: 9,5"
                     className="flex-1 min-w-0 text-sm border border-amber-200 rounded-md px-2 py-1 bg-white outline-none focus:border-amber-400"
                   />
                   {cards.length > 1 && (
@@ -755,7 +772,7 @@ export default function Etiquetas() {
                 <p className="text-xs text-slate-600 truncate">
                   <span className="font-bold text-slate-400 mr-2">#{idx + 1}</span>
                   {q.fields.length > 0
-                    ? q.fields.map(f => `${f.label}: ${f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '—')}`).join('  ·  ')
+                    ? camposParaExibir(q.fields).map(f => `${f.label}: ${f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '—')}`).join('  ·  ')
                     : '(sem campos de texto)'}
                   {q.includeStatus && (
                     <span className="ml-2 text-indigo-500 font-semibold">
@@ -824,17 +841,19 @@ function PrintEtiquetas({ queue, onClose }) {
 
         <div className="printable-sheet bg-white rounded-2xl print:rounded-none p-6 print:p-0">
           <div className="flex flex-wrap gap-4 print:gap-3">
-            {queue.map(q => (
+            {queue.map(q => {
+              const campos = camposParaExibir(q.fields);
+              return (
               <div
                 key={q.id}
                 style={{ width: '14cm', height: '6cm' }}
                 className="border-2 border-slate-800 rounded-md p-3 flex flex-col justify-between break-inside-avoid print:break-inside-avoid"
               >
                 <div className={`flex-1 flex flex-col overflow-hidden ${
-                  q.fields.length > 1 ? 'justify-evenly' : 'justify-center'
+                  campos.length > 1 ? 'justify-evenly' : 'justify-center'
                 }`}>
-                  {q.fields.length > 0 ? q.fields.map(f => (
-                    <p key={f.key} className={`${fieldTextSizeClass(q.fields.length)} leading-snug`}>
+                  {campos.length > 0 ? campos.map(f => (
+                    <p key={f.key} className={`${fieldTextSizeClass(campos.length)} leading-snug`}>
                       <span className="font-bold text-slate-800">{f.label.toUpperCase()}:</span>{' '}
                       <span className="text-slate-700">
                         {f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '')}
@@ -856,7 +875,8 @@ function PrintEtiquetas({ queue, onClose }) {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
