@@ -78,6 +78,19 @@ function emptyValues() {
   return FIELD_DEFS.reduce((acc, f) => ({ ...acc, [f.key]: '' }), {});
 }
 
+// Aceita "12,5" ou "12.5" (vírgula ou ponto) e devolve número, ou NaN se inválido.
+function parsePesoBR(str) {
+  if (str == null) return NaN;
+  return parseFloat(String(str).trim().replace(',', '.'));
+}
+// Devolve o número formatado com vírgula, sem casas decimais desnecessárias
+// (ex: 12.5 → "12,5"; 10 → "10"; 9.456 → "9,456").
+function formatPesoBR(n) {
+  if (!isFinite(n)) return '';
+  const arredondado = Math.round(n * 1000) / 1000;
+  return String(arredondado).replace('.', ',');
+}
+
 export default function Etiquetas() {
   const [included, setIncluded]       = useState(emptyIncluded());
   const [values, setValues]           = useState(emptyValues());
@@ -96,6 +109,7 @@ export default function Etiquetas() {
   // mas o resto da etiqueta é idêntico. ──
   const [multiPeso, setMultiPeso]         = useState(false);
   const [pesosMultiplos, setPesosMultiplos] = useState('');
+  const [tara, setTara]                   = useState(''); // ex: 15 (spyder do arame) — descontada de cada peso, não sai na etiqueta
 
   // ── Vínculo com Reformas (só leitura: nº da reforma + cliente) ──
   const [reformasList, setReformasList]         = useState([]);
@@ -167,13 +181,19 @@ export default function Etiquetas() {
         .filter(f => included[f.key] && f.key !== 'peso')
         .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
 
+      const taraNum = parsePesoBR(tara) || 0;
+
       setSavingQueue(true);
       try {
         const novasEtiquetas = [];
-        for (const peso of pesos) {
+        for (const pesoBruto of pesos) {
+          const pesoNum = parsePesoBR(pesoBruto);
+          // Desconta a tara (ex: 15kg do spyder) — se o valor digitado não for
+          // um número válido, mantém como foi digitado, sem tentar corrigir.
+          const pesoLiquido = isNaN(pesoNum) ? pesoBruto : formatPesoBR(pesoNum - taraNum);
           const fields = [
             ...baseFields,
-            { key: 'peso', label: pesoDef.label, value: peso, type: pesoDef.type },
+            { key: 'peso', label: pesoDef.label, value: pesoLiquido, type: pesoDef.type },
           ];
           const row = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -191,6 +211,7 @@ export default function Etiquetas() {
         setSelectedReformaId('');
         setMultiPeso(false);
         setPesosMultiplos('');
+        setTara('');
       } catch (e) {
         console.error('Erro ao salvar etiquetas (vários pesos):', e);
         alert('Não foi possível salvar todas as etiquetas agora. Verifique sua conexão, confira a fila e tente de novo com os pesos que faltarem.');
@@ -256,6 +277,7 @@ export default function Etiquetas() {
     setSelectedReformaId(''); // edição manual; se quiser revincular, escolhe de novo
     setMultiPeso(false);
     setPesosMultiplos('');
+    setTara('');
     setEditingId(id);
   }
 
@@ -268,6 +290,7 @@ export default function Etiquetas() {
     setSelectedReformaId('');
     setMultiPeso(false);
     setPesosMultiplos('');
+    setTara('');
   }
 
   async function handleRemove(id) {
@@ -416,18 +439,39 @@ export default function Etiquetas() {
             <p className="text-[11px] text-amber-600 mb-2">
               Os demais campos marcados acima (item, medida, NF, data, reforma, cliente...) serão repetidos em cada etiqueta. Só o peso muda.
             </p>
+
+            <div className="flex items-center gap-2 mb-2">
+              <label className="text-[11px] font-bold text-amber-700 shrink-0">Tara por peso (kg):</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={tara}
+                onChange={(e) => setTara(e.target.value)}
+                placeholder="ex: 15 (spyder do arame)"
+                className="w-40 text-sm border border-amber-200 rounded-md px-2 py-1 bg-white outline-none focus:border-amber-400"
+              />
+              <span className="text-[10px] text-amber-500">descontada de cada peso — não aparece na etiqueta</span>
+            </div>
+
             <textarea
               value={pesosMultiplos}
               onChange={(e) => setPesosMultiplos(e.target.value)}
-              placeholder={'Ex:\n12,5\n13,0\n11,8'}
+              placeholder={'Ex:\n27,5\n28,0\n26,8'}
               rows={4}
               className="w-full text-sm border border-amber-200 rounded-lg px-3 py-2 bg-white outline-none focus:border-amber-400"
             />
-            {pesosMultiplos.trim() && (
-              <p className="text-[11px] text-amber-700 font-semibold mt-1">
-                {pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean).length} etiqueta(s) serão geradas.
-              </p>
-            )}
+
+            {pesosMultiplos.trim() && (() => {
+              const pesosDigitados = pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
+              const taraNum = parsePesoBR(tara) || 0;
+              const liquidos = pesosDigitados.map(p => parsePesoBR(p)).filter(n => !isNaN(n)).map(n => n - taraNum);
+              const totalLiquido = liquidos.reduce((s, n) => s + n, 0);
+              return (
+                <p className="text-[11px] text-amber-700 font-semibold mt-1">
+                  {pesosDigitados.length} etiqueta(s) serão geradas — total líquido: {formatPesoBR(totalLiquido)} kg
+                </p>
+              );
+            })()}
           </div>
         )}
 
@@ -515,6 +559,36 @@ export default function Etiquetas() {
             )}
           </div>
         </div>
+
+        {/* Total de peso por medida — soma tudo que já está na fila, mesmo
+            vindo de lotes/momentos diferentes (útil pra conferir com a NF
+            quando o material chega misturado). */}
+        {(() => {
+          const totaisPorMedida = queue.reduce((acc, q) => {
+            const medidaField = q.fields.find(f => f.key === 'medida');
+            const pesoField   = q.fields.find(f => f.key === 'peso');
+            if (!medidaField?.value || !pesoField?.value) return acc;
+            const pesoNum = parsePesoBR(pesoField.value);
+            if (isNaN(pesoNum)) return acc;
+            const medida = medidaField.value;
+            if (!acc[medida]) acc[medida] = { total: 0, count: 0 };
+            acc[medida].total += pesoNum;
+            acc[medida].count += 1;
+            return acc;
+          }, {});
+          const medidas = Object.keys(totaisPorMedida);
+          if (medidas.length === 0) return null;
+          return (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {medidas.map(medida => (
+                <span key={medida} className="text-xs font-semibold bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-600">
+                  {medida}: <span className="text-slate-900">{formatPesoBR(totaisPorMedida[medida].total)} kg</span>
+                  <span className="text-slate-400 font-normal"> ({totaisPorMedida[medida].count})</span>
+                </span>
+              ))}
+            </div>
+          );
+        })()}
 
         {queueError && (
           <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
