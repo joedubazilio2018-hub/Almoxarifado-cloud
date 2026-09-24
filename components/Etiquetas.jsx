@@ -37,6 +37,8 @@ const reformasApi = {
 const filaApi = {
   getFila:        () => db('etiquetas_fila?order=created_at.asc'),
   insertFila:     (row) => db('etiquetas_fila', { method: 'POST', body: JSON.stringify(row) }),
+  // Insert em lote (array) — uma única chamada, tudo ou nada. Usado no modo "vários pesos".
+  insertFilaMany: (rows) => db('etiquetas_fila', { method: 'POST', body: JSON.stringify(rows) }),
   updateFila:     (id, row) => db(`etiquetas_fila?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(row) }),
   deleteFila:     (id) => db(`etiquetas_fila?id=eq.${id}`, { method: 'DELETE', prefer: '' }),
   deleteFilaIds:  (ids) => db(`etiquetas_fila?id=in.(${ids.join(',')})`, { method: 'DELETE', prefer: '' }),
@@ -91,6 +93,21 @@ function formatPesoBR(n) {
   return String(arredondado).replace('.', ',');
 }
 
+// Campos que mudam a cada etiqueta e por isso são limpos depois de "Adicionar".
+// Os demais (item, NF, data, reforma, cliente, pedido) e os checkboxes ficam como estão,
+// pra você não precisar remarcar tudo a cada etiqueta. Quer que o Item também limpe? Inclua 'item' aqui.
+const CAMPOS_LIMPOS_APOS_ADICIONAR = ['medida', 'peso', 'obs'];
+
+// Separa os pesos digitados. Aceita quebra de linha, espaço ou ponto e vírgula.
+// ATENÇÃO: vírgula NÃO separa, porque é o separador decimal (27,5 = vinte e sete e meio).
+function parsePesosLista(str) {
+  return String(str || '').split(/[\s;]+/).map(p => p.trim()).filter(Boolean);
+}
+
+function novoCard(id) {
+  return { id: id || `c${Date.now()}`, medida: '', pesos: '' };
+}
+
 export default function Etiquetas() {
   const [included, setIncluded]       = useState(emptyIncluded());
   const [values, setValues]           = useState(emptyValues());
@@ -106,9 +123,12 @@ export default function Etiquetas() {
   // ── Modo "vários pesos": gera uma etiqueta pra cada peso digitado,
   // repetindo os demais campos (item, medida, NF, data, reforma, cliente...).
   // Útil pra arames/tubos, onde cada rolo/peça tem um peso diferente
-  // mas o resto da etiqueta é idêntico. ──
+  // mas o resto da etiqueta é idêntico.
+  // Cada "card" é uma medida (ex: 9,5mm, 6mm) com a sua lista de pesos:
+  // dá pra alternar entre os cards e gerar tudo de uma vez. ──
   const [multiPeso, setMultiPeso]         = useState(false);
-  const [pesosMultiplos, setPesosMultiplos] = useState('');
+  const [cards, setCards]                 = useState([novoCard('c0')]);
+  const [activeCardId, setActiveCardId]   = useState('c0');
   const [tara, setTara]                   = useState(''); // ex: 15 (spyder do arame) — descontada de cada peso, não sai na etiqueta
 
   // ── Vínculo com Reformas (só leitura: nº da reforma + cliente) ──
@@ -163,58 +183,112 @@ export default function Etiquetas() {
 
   const selectedCount = FIELD_DEFS.filter(f => included[f.key]).length;
 
-  async function handleAdd() {
-    // ── Modo "vários pesos": um insert por peso, mesmo restante da etiqueta ──
-    if (multiPeso && included.peso && !editingId) {
-      const pesos = pesosMultiplos
-        .split(/[\n,]+/)
-        .map(p => p.trim())
-        .filter(Boolean);
+  // Modo "vários pesos" só vale se o campo Peso estiver marcado e não estiver editando uma etiqueta.
+  const multiAtivo = multiPeso && included.peso && !editingId;
 
-      if (pesos.length === 0) {
-        alert('Digite pelo menos um peso (um por linha).');
+  const taraNum = parsePesoBR(tara) || 0;
+  const activeCard = cards.find(c => c.id === activeCardId) || cards[0];
+
+  function toggleMultiPeso() {
+    const next = !multiPeso;
+    setMultiPeso(next);
+    if (next) setIncluded(prev => ({ ...prev, medida: true })); // a medida vem dos cards
+  }
+  function updateCard(id, patch) {
+    setCards(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+  }
+  function addCard() {
+    const c = novoCard();
+    setCards(prev => [...prev, c]);
+    setActiveCardId(c.id);
+  }
+  function removeCard(id) {
+    if (cards.length <= 1) return;
+    const restantes = cards.filter(c => c.id !== id);
+    setCards(restantes);
+    if (activeCardId === id) setActiveCardId(restantes[0].id);
+  }
+  function resetCards() {
+    setCards([novoCard('c0')]);
+    setActiveCardId('c0');
+  }
+  // Quantidade de etiquetas e peso líquido de um card
+  function resumoCard(card) {
+    const pesos = parsePesosLista(card.pesos);
+    const liquidos = pesos.map(parsePesoBR).filter(n => !isNaN(n)).map(n => n - taraNum);
+    return { qtd: pesos.length, liquido: liquidos.reduce((s, n) => s + n, 0) };
+  }
+  const totalEtiquetasMulti = cards.reduce((s, c) => s + resumoCard(c).qtd, 0);
+  const totalLiquidoMulti   = cards.reduce((s, c) => s + resumoCard(c).liquido, 0);
+
+  function limparValoresPorEtiqueta() {
+    setValues(prev => {
+      const next = { ...prev };
+      CAMPOS_LIMPOS_APOS_ADICIONAR.forEach(k => { next[k] = ''; });
+      return next;
+    });
+  }
+
+  async function handleAdd() {
+    // ── Modo "vários pesos": uma etiqueta por peso, em cada card (medida) ──
+    if (multiAtivo) {
+      const pesoDef = FIELD_DEFS.find(f => f.key === 'peso');
+      const rows = [];
+
+      for (const card of cards) {
+        const pesos = parsePesosLista(card.pesos);
+        if (pesos.length === 0) continue; // card sem pesos é ignorado
+        const medida = card.medida.trim();
+
+        if (included.medida && !medida) {
+          alert('Tem um card com pesos mas sem medida. Preencha a medida ou apague o card.');
+          setActiveCardId(card.id);
+          return;
+        }
+
+        for (const pesoBruto of pesos) {
+          const pesoNum = parsePesoBR(pesoBruto);
+          if (!isNaN(pesoNum) && pesoNum - taraNum <= 0) {
+            alert(`O peso "${pesoBruto}" (${medida || 'sem medida'}) é menor ou igual à tara (${formatPesoBR(taraNum)} kg). Confira antes de gerar.`);
+            setActiveCardId(card.id);
+            return;
+          }
+          // Desconta a tara — se o valor digitado não for um número válido, mantém como digitado.
+          const pesoLiquido = isNaN(pesoNum) ? pesoBruto : formatPesoBR(pesoNum - taraNum);
+
+          // Monta na ordem de FIELD_DEFS: medida vem do card, peso é o líquido, o resto vem do formulário.
+          const fields = FIELD_DEFS
+            .filter(f => f.key === 'peso' || included[f.key])
+            .map(f => ({
+              key: f.key, label: f.label, type: f.type,
+              value: f.key === 'peso' ? pesoLiquido : f.key === 'medida' ? medida : values[f.key],
+            }));
+
+          rows.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            fields, include_status: includeStatus, status,
+          });
+        }
+      }
+
+      if (rows.length === 0) {
+        alert('Digite pelo menos um peso em algum card (um por linha).');
         return;
       }
 
-      const pesoDef = FIELD_DEFS.find(f => f.key === 'peso');
-      const baseFields = FIELD_DEFS
-        .filter(f => included[f.key] && f.key !== 'peso')
-        .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
-
-      const taraNum = parsePesoBR(tara) || 0;
-
       setSavingQueue(true);
       try {
-        const novasEtiquetas = [];
-        for (const pesoBruto of pesos) {
-          const pesoNum = parsePesoBR(pesoBruto);
-          // Desconta a tara (ex: 15kg do spyder) — se o valor digitado não for
-          // um número válido, mantém como foi digitado, sem tentar corrigir.
-          const pesoLiquido = isNaN(pesoNum) ? pesoBruto : formatPesoBR(pesoNum - taraNum);
-          const fields = [
-            ...baseFields,
-            { key: 'peso', label: pesoDef.label, value: pesoLiquido, type: pesoDef.type },
-          ];
-          const row = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            fields, include_status: includeStatus, status,
-          };
-          await filaApi.insertFila(row);
-          novasEtiquetas.push({ id: row.id, fields, includeStatus, status });
-        }
-        setQueue(prev => [...prev, ...novasEtiquetas]);
-
-        setValues(emptyValues());
-        setIncluded(emptyIncluded());
-        setIncludeStatus(false);
-        setStatus('');
-        setSelectedReformaId('');
-        setMultiPeso(false);
-        setPesosMultiplos('');
-        setTara('');
+        await filaApi.insertFilaMany(rows); // tudo ou nada: se falhar, nenhuma etiqueta entra
+        setQueue(prev => [
+          ...prev,
+          ...rows.map(r => ({ id: r.id, fields: r.fields, includeStatus, status })),
+        ]);
+        // Mantém o modo, os cards (medidas) e os campos fixos; limpa só os pesos.
+        setCards(prev => prev.map(c => ({ ...c, pesos: '' })));
+        limparValoresPorEtiqueta();
       } catch (e) {
         console.error('Erro ao salvar etiquetas (vários pesos):', e);
-        alert('Não foi possível salvar todas as etiquetas agora. Verifique sua conexão, confira a fila e tente de novo com os pesos que faltarem.');
+        alert('Não foi possível salvar as etiquetas agora. Nenhuma foi adicionada. Verifique sua conexão e tente de novo.');
       } finally {
         setSavingQueue(false);
       }
@@ -227,6 +301,13 @@ export default function Etiquetas() {
 
     if (fields.length === 0 && !includeStatus) return;
 
+    // Como os checkboxes agora ficam marcados entre uma etiqueta e outra,
+    // evita gerar etiqueta em branco por clique sem querer.
+    if (fields.length > 0 && !includeStatus && fields.every(f => !String(f.value || '').trim())) {
+      alert('Preencha pelo menos um campo antes de adicionar.');
+      return;
+    }
+
     setSavingQueue(true);
     try {
       if (editingId) {
@@ -235,6 +316,13 @@ export default function Etiquetas() {
           q.id === editingId ? { ...q, fields, includeStatus, status } : q
         ));
         setEditingId(null);
+
+        // Terminou de editar: volta o formulário ao estado inicial.
+        setValues(emptyValues());
+        setIncluded(emptyIncluded());
+        setIncludeStatus(false);
+        setStatus('');
+        setSelectedReformaId('');
       } else {
         const row = {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -242,15 +330,11 @@ export default function Etiquetas() {
         };
         await filaApi.insertFila(row);
         setQueue(prev => [...prev, { id: row.id, fields, includeStatus, status }]);
-      }
 
-      // Mantém os campos marcados (mesma estrutura) mas limpa os valores,
-      // pra facilitar preencher a próxima etiqueta igual.
-      setValues(emptyValues());
-      setIncluded(emptyIncluded());
-      setIncludeStatus(false);
-      setStatus('');
-      setSelectedReformaId('');
+        // Mantém checkboxes, carimbo de status e vínculo com a reforma marcados;
+        // limpa só o que muda a cada etiqueta (ver CAMPOS_LIMPOS_APOS_ADICIONAR).
+        limparValoresPorEtiqueta();
+      }
     } catch (e) {
       console.error('Erro ao salvar etiqueta na fila:', e);
       alert('Não foi possível salvar a etiqueta agora. Verifique sua conexão e tente de novo.');
@@ -276,7 +360,7 @@ export default function Etiquetas() {
     setStatus(item.status || '');
     setSelectedReformaId(''); // edição manual; se quiser revincular, escolhe de novo
     setMultiPeso(false);
-    setPesosMultiplos('');
+    resetCards();
     setTara('');
     setEditingId(id);
   }
@@ -289,7 +373,7 @@ export default function Etiquetas() {
     setStatus('');
     setSelectedReformaId('');
     setMultiPeso(false);
-    setPesosMultiplos('');
+    resetCards();
     setTara('');
   }
 
@@ -387,6 +471,7 @@ export default function Etiquetas() {
           {FIELD_DEFS.map(f => {
             const lockedByReforma = isLinked && (f.key === 'reforma' || f.key === 'cliente');
             const isPeso = f.key === 'peso';
+            const isMedida = f.key === 'medida';
             return (
               <div key={f.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 transition ${
                 lockedByReforma
@@ -406,7 +491,7 @@ export default function Etiquetas() {
                 {isPeso && included.peso && !editingId ? (
                   <button
                     type="button"
-                    onClick={() => setMultiPeso(v => !v)}
+                    onClick={toggleMultiPeso}
                     className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-md border transition mr-1 ${
                       multiPeso
                         ? 'bg-amber-500 border-amber-500 text-white'
@@ -421,9 +506,13 @@ export default function Etiquetas() {
                   type={f.type}
                   value={values[f.key]}
                   onChange={(e) => setValue(f.key, e.target.value)}
-                  disabled={!included[f.key] || (isPeso && multiPeso)}
+                  disabled={!included[f.key] || (isPeso && multiAtivo) || (isMedida && multiAtivo)}
                   readOnly={lockedByReforma}
-                  placeholder={isPeso && multiPeso ? 'defina os pesos abaixo' : (f.type === 'text' ? f.label : '')}
+                  placeholder={
+                    isPeso && multiAtivo ? 'defina os pesos abaixo'
+                    : isMedida && multiAtivo ? 'definida nos cards abaixo'
+                    : (f.type === 'text' ? f.label : '')
+                  }
                   className={`flex-1 min-w-0 text-sm bg-transparent outline-none disabled:text-slate-300 ${lockedByReforma ? 'text-emerald-700 font-semibold' : ''}`}
                 />
               </div>
@@ -431,16 +520,16 @@ export default function Etiquetas() {
           })}
         </div>
 
-        {multiPeso && included.peso && !editingId && (
+        {multiAtivo && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3">
             <p className="text-xs font-bold text-amber-700 mb-1">
-              ⚖️ Vários pesos — um por linha (ou separados por vírgula)
+              ⚖️ Vários pesos por medida
             </p>
             <p className="text-[11px] text-amber-600 mb-2">
-              Os demais campos marcados acima (item, medida, NF, data, reforma, cliente...) serão repetidos em cada etiqueta. Só o peso muda.
+              Cada card é uma medida. Toque num card pra alternar entre eles e digite os pesos dele (um por linha ou separados por espaço). Os demais campos marcados acima (item, NF, data, reforma, cliente...) se repetem em todas as etiquetas. Ao final, um clique gera tudo.
             </p>
 
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-3">
               <label className="text-[11px] font-bold text-amber-700 shrink-0">Tara por peso (kg):</label>
               <input
                 type="text"
@@ -453,25 +542,82 @@ export default function Etiquetas() {
               <span className="text-[10px] text-amber-500">descontada de cada peso — não aparece na etiqueta</span>
             </div>
 
-            <textarea
-              value={pesosMultiplos}
-              onChange={(e) => setPesosMultiplos(e.target.value)}
-              placeholder={'Ex:\n27,5\n28,0\n26,8'}
-              rows={4}
-              className="w-full text-sm border border-amber-200 rounded-lg px-3 py-2 bg-white outline-none focus:border-amber-400"
-            />
+            {/* Cards de medida */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {cards.map(c => {
+                const r = resumoCard(c);
+                const ativo = activeCard && activeCard.id === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setActiveCardId(c.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                      ativo
+                        ? 'bg-amber-500 border-amber-500 text-white'
+                        : 'bg-white border-amber-200 text-amber-700 hover:border-amber-400'
+                    }`}
+                  >
+                    {c.medida.trim() || 'Sem medida'}
+                    <span className={`ml-1.5 font-semibold ${ativo ? 'text-amber-100' : 'text-amber-400'}`}>
+                      ({r.qtd})
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={addCard}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-dashed border-amber-400 text-amber-600 bg-white hover:bg-amber-100 transition"
+              >
+                + Medida
+              </button>
+            </div>
 
-            {pesosMultiplos.trim() && (() => {
-              const pesosDigitados = pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean);
-              const taraNum = parsePesoBR(tara) || 0;
-              const liquidos = pesosDigitados.map(p => parsePesoBR(p)).filter(n => !isNaN(n)).map(n => n - taraNum);
-              const totalLiquido = liquidos.reduce((s, n) => s + n, 0);
-              return (
-                <p className="text-[11px] text-amber-700 font-semibold mt-1">
-                  {pesosDigitados.length} etiqueta(s) serão geradas — total líquido: {formatPesoBR(totalLiquido)} kg
-                </p>
-              );
-            })()}
+            {activeCard && (
+              <div className="rounded-lg border border-amber-200 bg-white px-3 py-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-[11px] font-bold text-amber-700 shrink-0">Medida:</label>
+                  <input
+                    type="text"
+                    value={activeCard.medida}
+                    onChange={(e) => updateCard(activeCard.id, { medida: e.target.value })}
+                    placeholder="ex: 9,5mm"
+                    className="flex-1 min-w-0 text-sm border border-amber-200 rounded-md px-2 py-1 bg-white outline-none focus:border-amber-400"
+                  />
+                  {cards.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeCard(activeCard.id)}
+                      className="shrink-0 text-[11px] font-bold text-slate-400 hover:text-red-500 transition"
+                    >
+                      🗑 Apagar card
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={activeCard.pesos}
+                  onChange={(e) => updateCard(activeCard.id, { pesos: e.target.value })}
+                  placeholder={'Pesos, um por linha. Ex:\n27,5\n28,0\n26,8'}
+                  rows={4}
+                  className="w-full text-sm border border-amber-200 rounded-lg px-3 py-2 bg-white outline-none focus:border-amber-400"
+                />
+                {(() => {
+                  const r = resumoCard(activeCard);
+                  return r.qtd > 0 ? (
+                    <p className="text-[11px] text-amber-700 font-semibold mt-1">
+                      {r.qtd} peso(s) nesta medida — líquido: {formatPesoBR(r.liquido)} kg
+                    </p>
+                  ) : null;
+                })()}
+              </div>
+            )}
+
+            {totalEtiquetasMulti > 0 && (
+              <p className="text-[11px] text-amber-700 font-semibold mt-2">
+                Total: {totalEtiquetasMulti} etiqueta(s) serão geradas — líquido: {formatPesoBR(totalLiquidoMulti)} kg
+              </p>
+            )}
           </div>
         )}
 
@@ -516,7 +662,7 @@ export default function Etiquetas() {
             disabled={
               (selectedCount === 0 && !includeStatus) ||
               savingQueue ||
-              (multiPeso && included.peso && !editingId && pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean).length === 0)
+              (multiAtivo && totalEtiquetasMulti === 0)
             }
             className={`px-5 py-2.5 text-white rounded-lg text-sm font-bold transition disabled:bg-slate-200 disabled:text-slate-400 ${
               editingId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
@@ -526,8 +672,8 @@ export default function Etiquetas() {
               ? 'Salvando...'
               : editingId
               ? '✓ Salvar edição'
-              : multiPeso && included.peso
-              ? `+ Adicionar ${pesosMultiplos.split(/[\n,]+/).map(p => p.trim()).filter(Boolean).length || ''} etiqueta(s) à fila`
+              : multiAtivo
+              ? `+ Adicionar ${totalEtiquetasMulti || ''} etiqueta(s) à fila`
               : '+ Adicionar à fila de impressão'}
           </button>
           {editingId && (
