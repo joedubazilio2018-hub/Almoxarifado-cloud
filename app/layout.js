@@ -1,9 +1,14 @@
 import './globals.css';
+import RegisterSW from '../components/RegisterSW';
 
 export const metadata = {
   title: 'Almoxarifado Cloud',
   description: 'Gestão de Estoque & Kanban Inteligente',
   manifest: '/manifest.webmanifest',
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/apple-touch-icon.png',
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
@@ -26,7 +31,10 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="pt-BR">
-      <body>{children}</body>
+      <body>
+        <RegisterSW />
+        {children}
+      </body>
     </html>
   );
 }
