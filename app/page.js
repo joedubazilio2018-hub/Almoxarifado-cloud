@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Reformas from '../components/Reformas';
 import Etiquetas from '../components/Etiquetas';
 import ContagemSemanal from '../components/ContagemSemanal';
+import BarcodeScanner from '../components/BarcodeScanner';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG
@@ -326,6 +327,7 @@ export default function InventoryApp() {
     notes: '',
     items: [{ itemId: '', qty: '' }],
   });
+  const [scannerOpen, setScannerOpen] = useState(false);
   const [receivingSc, setReceivingSc] = useState(null);
   const [receiveQty,  setReceiveQty]  = useState('');
   const [newSc, setNewSc] = useState({ itemId: '', sc: '', qty: '', dateSc: today(), dateEta: '' });
@@ -608,6 +610,29 @@ export default function InventoryApp() {
     }, 0);
     return getQty(itemId) - usedElsewhere;
   }, [newOutbound.items, getQty]);
+
+  // Código lido pela câmera = id do item. Coloca o item no lote e já foca na quantidade.
+  const handleScanOutbound = (raw) => {
+    setScannerOpen(false);
+    const code = String(raw || '').trim();
+    const item = items.find(i => i.id === code) || items.find(i => i.id.toLowerCase() === code.toLowerCase());
+    if (!item) return showToast(`Código "${code}" não encontrado no estoque.`, 'error');
+
+    const focarQtd = () => setTimeout(() => document.getElementById(`out-qty-${item.id}`)?.focus(), 150);
+
+    if (newOutbound.items.some(r => r.itemId === item.id)) {
+      showToast(`"${item.name}" já está no lote — ajuste a quantidade.`, 'error');
+      focarQtd();
+      return;
+    }
+    setNewOutbound(prev => {
+      const vazio = prev.items.findIndex(r => !r.itemId);
+      if (vazio >= 0) return { ...prev, items: prev.items.map((r, i) => i === vazio ? { ...r, itemId: item.id } : r) };
+      return { ...prev, items: [...prev.items, { itemId: item.id, qty: '' }] };
+    });
+    showToast(`Lido: ${item.name}`);
+    focarQtd();
+  };
 
   const handleOutbound = async (e) => {
     e.preventDefault();
@@ -1649,7 +1674,13 @@ export default function InventoryApp() {
                     </div>
 
                     <div className="space-y-3">
-                      <p className="text-xs font-bold text-slate-500 uppercase">Itens</p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-500 uppercase">Itens</p>
+                        <button type="button" onClick={() => setScannerOpen(true)}
+                          className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg transition">
+                          📷 Escanear item
+                        </button>
+                      </div>
                       {newOutbound.items.map((row, idx) => {
                         const available = getAvailableForRow(row.itemId, idx);
                         return (
@@ -1659,7 +1690,7 @@ export default function InventoryApp() {
                                 onChange={v => updateOutboundRow(idx, 'itemId', v)}
                                 getQty={getQty} showStock={true} ringColor="rose" />
                               <div className="flex items-center gap-2">
-                                <Input ringColor="rose" type="number" required min="1" placeholder="Quantidade"
+                                <Input ringColor="rose" type="number" required min="1" placeholder="Quantidade" id={row.itemId ? `out-qty-${row.itemId}` : undefined}
                                   value={row.qty} onChange={e => updateOutboundRow(idx, 'qty', e.target.value)} />
                                 {row.itemId && available !== null && (
                                   <span className={`text-[11px] font-bold shrink-0 ${available < 0 ? 'text-red-500' : 'text-slate-400'}`}>
@@ -1688,6 +1719,7 @@ export default function InventoryApp() {
                     </Field>
                     <SubmitBtn color="rose" disabled={saving}>{saving ? 'Salvando...' : 'Confirmar Baixa no Estoque'}</SubmitBtn>
                   </form>
+                  {scannerOpen && <BarcodeScanner onScan={handleScanOutbound} onClose={() => setScannerOpen(false)} />}
                 </div>
               )}
 
