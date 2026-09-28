@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { PrintCheckbox, fmtDate } from './printUtils';
 import Barcode from './Barcode';
+import QrCode from './QrCode';
+import BarcodeScanner from './BarcodeScanner';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG (mesmo projeto do page.js / Reformas.jsx)
@@ -31,6 +33,15 @@ async function db(path, opts = {}) {
 // Itens do estoque (só id + nome): usados pra sugerir o código de barras na etiqueta.
 const itemsApi = {
   getItems: () => db('items?select=id,name&order=name'),
+};
+
+// Caixas com QR: cada etiqueta de QR cria uma linha aqui (id curto, item, quantidade e
+// se já foi baixada). A leitura na aba Saída consulta esta tabela.
+const caixasApi = {
+  insertMany: (rows) => db('caixas', { method: 'POST', body: JSON.stringify(rows) }),
+  // só altera caixa ainda disponível (uma caixa já baixada não pode mudar de quantidade)
+  updateDisponivel: (id, row) => db(`caixas?id=eq.${id}&status=eq.disponivel`, { method: 'PATCH', body: JSON.stringify(row) }),
+  deleteIds: (ids) => db(`caixas?id=in.(${ids.join(',')})`, { method: 'DELETE', prefer: '' }),
 };
 
 const reformasApi = {
@@ -65,6 +76,7 @@ const FIELD_DEFS = [
   { key: 'item',    label: 'Item / Descrição', type: 'text' },
   { key: 'codigo',  label: 'Cód. de barras',   type: 'text' },
   { key: 'medida',  label: 'Medida',           type: 'text' },
+  { key: 'qtd',     label: 'Quantidade',       type: 'text' },
   { key: 'nf',      label: 'Nº NF',            type: 'text' },
   { key: 'data',    label: 'Data',             type: 'date' },
   { key: 'peso',    label: 'Peso',             type: 'text' },
@@ -72,6 +84,7 @@ const FIELD_DEFS = [
   { key: 'cliente', label: 'Cliente',          type: 'text' },
   { key: 'pedido',  label: 'Nº Pedido',        type: 'text' },
   { key: 'obs',     label: 'Obs',              type: 'text' },
+  { key: 'qr',      label: 'QR da caixa',      type: 'qr'   },
 ];
 
 const STATUS_OPTIONS = [
@@ -128,6 +141,29 @@ function camposParaExibir(fields) {
     .map(f => f.key === 'item' ? { ...f, value: junto } : f);
 }
 
+// Id curto da caixa (vai dentro do QR como "CX:" + id). Sem 0/O/1/I pra não confundir.
+function novoCaixaId() {
+  const letras = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let id = '';
+  for (let i = 0; i < 6; i++) id += letras[Math.floor(Math.random() * letras.length)];
+  return id;
+}
+
+// Lê a lista de quantidades das caixas. Cada linha/espaço = uma caixa.
+// "3x50" = três caixas de 50. Vírgula NÃO separa (é decimal). Devolve { qtds, invalidos }.
+function parseQtdCaixas(str) {
+  const qtds = [];
+  const invalidos = [];
+  for (const parte of String(str || '').split(/[\s;]+/).map(p => p.trim()).filter(Boolean)) {
+    const m = /^(\d+)\s*[x×]\s*(\d+(?:[.,]\d+)?)$/i.exec(parte);
+    const vezes = m ? parseInt(m[1], 10) : 1;
+    const n = parsePesoBR(m ? m[2] : parte);
+    if (isNaN(n) || n <= 0 || vezes < 1 || vezes > 200) { invalidos.push(parte); continue; }
+    for (let i = 0; i < vezes; i++) qtds.push(n);
+  }
+  return { qtds, invalidos };
+}
+
 function novoCard(id) {
   return { id: id || `c${Date.now()}`, medida: '', pesos: '' };
 }
@@ -163,6 +199,15 @@ export default function Etiquetas() {
 
   // Itens do estoque, pra sugerir o código de barras (o código é o id do item).
   const [itensEstoque, setItensEstoque] = useState([]);
+  const [qrQtds, setQrQtds] = useState('');          // quantidades das caixas (uma por linha)
+  const [scanCodigoOpen, setScanCodigoOpen] = useState(false);
+
+  // Acha o item do estoque pelo código digitado (o código é o id do item).
+  const achaItem = (codigo) => {
+    const c = String(codigo || '').trim();
+    if (!c) return null;
+    return itensEstoque.find(i => i.id === c) || itensEstoque.find(i => i.id.toLowerCase() === c.toLowerCase()) || null;
+  };
   useEffect(() => {
     itemsApi.getItems().then(setItensEstoque).catch(() => {}); // sem lista, dá pra digitar o código na mão
   }, []);
@@ -208,13 +253,29 @@ export default function Etiquetas() {
     // Mantém o que já estava preenchido, só destrava pra edição manual.
   }
 
-  const toggleField = (key) => setIncluded(prev => ({ ...prev, [key]: !prev[key] }));
+  // Marcar "QR da caixa" já marca Item, Cód. de barras e Quantidade (o QR precisa deles).
+  const toggleField = (key) => setIncluded(prev => {
+    const ligando = !prev[key];
+    if (key === 'qr' && ligando) return { ...prev, qr: true, item: true, codigo: true, qtd: true };
+    return { ...prev, [key]: !prev[key] };
+  });
   const setValue     = (key, v) => setValues(prev => ({ ...prev, [key]: v }));
+
+  // Ao digitar/escolher/escanear o código, o nome do item preenche sozinho.
+  function handleCodigoChange(v) {
+    const it = achaItem(v);
+    setValues(prev => ({ ...prev, codigo: v, ...(it ? { item: it.name } : {}) }));
+    if (it) setIncluded(prev => ({ ...prev, item: true }));
+  }
 
   const selectedCount = FIELD_DEFS.filter(f => included[f.key]).length;
 
   // Modo "vários pesos" só vale se o campo Peso estiver marcado e não estiver editando uma etiqueta.
-  const multiAtivo = multiPeso && included.peso && !editingId;
+  // Modo "QR da caixa": uma etiqueta (e uma caixa nova no sistema) por quantidade digitada.
+  const qrAtivo = included.qr && !editingId;
+  const multiAtivo = multiPeso && included.peso && !editingId && !qrAtivo;
+  const { qtds: qtdsCaixas, invalidos: qtdsInvalidas } = parseQtdCaixas(qrQtds);
+  const itemDoCodigo = achaItem(values.codigo);
 
   const taraNum = parsePesoBR(tara) || 0;
   const activeCard = cards.find(c => c.id === activeCardId) || cards[0];
@@ -260,6 +321,71 @@ export default function Etiquetas() {
   }
 
   async function handleAdd() {
+    // ── Modo "QR da caixa": uma caixa + uma etiqueta por quantidade digitada ──
+    if (qrAtivo) {
+      if (!itemDoCodigo) {
+        alert('Para gerar o QR da caixa, informe um código de item que exista no estoque (digite ou escaneie o código de barras).');
+        return;
+      }
+      if (qtdsInvalidas.length > 0) {
+        alert(`Quantidade inválida: ${qtdsInvalidas.join(', ')}. Use só números (ex: 87) ou 3x50 para três caixas de 50.`);
+        return;
+      }
+      if (qtdsCaixas.length === 0) {
+        alert('Digite a quantidade de cada caixa (uma por linha).');
+        return;
+      }
+
+      const caixas = [];
+      const rows = [];
+      for (const q of qtdsCaixas) {
+        const cid = novoCaixaId();
+        caixas.push({ id: cid, item_id: itemDoCodigo.id, qty: q, status: 'disponivel' });
+        const fields = FIELD_DEFS
+          .filter(f => included[f.key] || f.key === 'codigo' || f.key === 'qtd' || f.key === 'qr')
+          .map(f => ({
+            key: f.key, label: f.label, type: f.type,
+            value: f.key === 'qr' ? cid
+                 : f.key === 'qtd' ? formatPesoBR(q)
+                 : f.key === 'codigo' ? itemDoCodigo.id
+                 : values[f.key],
+          }));
+        rows.push({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          fields, include_status: includeStatus, status,
+        });
+      }
+
+      setSavingQueue(true);
+      let caixasCriadas = false;
+      try {
+        await caixasApi.insertMany(caixas);   // 1º cria as caixas no sistema
+        caixasCriadas = true;
+        await filaApi.insertFilaMany(rows);   // 2º põe as etiquetas na fila
+        setQueue(prev => [
+          ...prev,
+          ...rows.map(r => ({ id: r.id, fields: r.fields, includeStatus, status })),
+        ]);
+        setQrQtds('');                        // limpa só as quantidades; o resto fica pra próxima leva
+        limparValoresPorEtiqueta();
+      } catch (e) {
+        console.error('Erro ao gerar etiquetas com QR:', e);
+        if (caixasCriadas) {
+          // a fila falhou: apaga as caixas recém-criadas pra não sobrar caixa sem etiqueta
+          try { await caixasApi.deleteIds(caixas.map(c => c.id)); } catch {}
+        }
+        const msg = String(e?.message || '');
+        if (/caixas/i.test(msg) && /(relation|does not exist|schema cache|404)/i.test(msg)) {
+          alert('A tabela "caixas" ainda não existe no Supabase. Rode o SQL do arquivo caixas.txt no SQL Editor e tente de novo.');
+        } else {
+          alert('Não foi possível gerar as etiquetas agora. Nenhuma foi adicionada. Verifique sua conexão e tente de novo.');
+        }
+      } finally {
+        setSavingQueue(false);
+      }
+      return;
+    }
+
     // ── Modo "vários pesos": uma etiqueta por peso, em cada card (medida) ──
     if (multiAtivo) {
       const pesoDef = FIELD_DEFS.find(f => f.key === 'peso');
@@ -326,10 +452,18 @@ export default function Etiquetas() {
     }
 
     const fields = FIELD_DEFS
-      .filter(f => included[f.key])
+      .filter(f => included[f.key] || (included.qr && (f.key === 'codigo' || f.key === 'qtd')))
       .map(f => ({ key: f.key, label: f.label, value: values[f.key], type: f.type }));
 
     if (fields.length === 0 && !includeStatus) return;
+
+    // Editando uma etiqueta com QR: a quantidade/item também mudam na caixa do sistema.
+    const editaQr = !!(editingId && included.qr && values.qr);
+    const qtdEditada = parsePesoBR(values.qtd);
+    if (editaQr && (!itemDoCodigo || isNaN(qtdEditada) || qtdEditada <= 0)) {
+      alert('Etiqueta com QR precisa de um código de item válido e uma quantidade maior que zero.');
+      return;
+    }
 
     // Como os checkboxes agora ficam marcados entre uma etiqueta e outra,
     // evita gerar etiqueta em branco por clique sem querer.
@@ -341,6 +475,12 @@ export default function Etiquetas() {
     setSavingQueue(true);
     try {
       if (editingId) {
+        if (editaQr) {
+          const atualizadas = await caixasApi.updateDisponivel(values.qr, { item_id: itemDoCodigo.id, qty: qtdEditada });
+          if (atualizadas.length === 0) {
+            alert('Essa caixa já foi baixada (ou não existe no sistema): a etiqueta foi atualizada, mas a caixa não mudou.');
+          }
+        }
         await filaApi.updateFila(editingId, { fields, include_status: includeStatus, status });
         setQueue(prev => prev.map(q =>
           q.id === editingId ? { ...q, fields, includeStatus, status } : q
@@ -392,6 +532,7 @@ export default function Etiquetas() {
     setMultiPeso(false);
     resetCards();
     setTara('');
+    setQrQtds('');
     setEditingId(id);
   }
 
@@ -532,16 +673,32 @@ export default function Etiquetas() {
                     ⚖️ Vários pesos
                   </button>
                 ) : null}
+                {f.key === 'codigo' && included.codigo && (
+                  <button
+                    type="button"
+                    onClick={() => setScanCodigoOpen(true)}
+                    className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-md border bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition mr-1"
+                    title="Ler o código de barras do item pela câmera"
+                  >
+                    📷
+                  </button>
+                )}
                 <input
-                  type={f.type}
+                  type={f.type === 'qr' ? 'text' : f.type}
                   list={f.key === 'codigo' ? 'itens-codigo' : undefined}
                   value={values[f.key]}
-                  onChange={(e) => setValue(f.key, e.target.value)}
-                  disabled={!included[f.key] || (isPeso && multiAtivo) || (isMedida && multiAtivo)}
+                  onChange={(e) => (f.key === 'codigo' ? handleCodigoChange(e.target.value) : setValue(f.key, e.target.value))}
+                  disabled={
+                    !included[f.key] || f.key === 'qr'
+                    || (isPeso && multiAtivo) || (isMedida && multiAtivo)
+                    || (f.key === 'qtd' && qrAtivo)
+                  }
                   readOnly={lockedByReforma}
                   placeholder={
                     isPeso && multiAtivo ? 'defina os pesos abaixo'
                     : isMedida && multiAtivo ? 'definida nos cards abaixo'
+                    : f.key === 'qtd' && qrAtivo ? 'definida nas caixas abaixo'
+                    : f.key === 'qr' ? 'gerado automaticamente'
                     : (f.type === 'text' ? f.label : '')
                   }
                   className={`flex-1 min-w-0 text-sm bg-transparent outline-none disabled:text-slate-300 ${lockedByReforma ? 'text-emerald-700 font-semibold' : ''}`}
@@ -550,6 +707,51 @@ export default function Etiquetas() {
             );
           })}
         </div>
+
+        {scanCodigoOpen && (
+          <BarcodeScanner
+            title="📷 Aponte para o código de barras do item"
+            onScan={(txt) => { setScanCodigoOpen(false); handleCodigoChange(String(txt || '').trim()); }}
+            onClose={() => setScanCodigoOpen(false)}
+          />
+        )}
+
+        {included.codigo && values.codigo.trim() !== '' && (
+          <p className={`mt-2 text-[11px] font-semibold ${itemDoCodigo ? 'text-emerald-600' : 'text-amber-600'}`}>
+            {itemDoCodigo
+              ? `✓ ${itemDoCodigo.name} — nome preenchido em "Item / Descrição"`
+              : 'Código não encontrado no estoque.'}
+          </p>
+        )}
+
+        {qrAtivo && (
+          <div className="mt-3 rounded-lg border border-sky-300 bg-sky-50 px-3 py-3">
+            <p className="text-xs font-bold text-sky-700 mb-1">📦 QR por caixa</p>
+            <p className="text-[11px] text-sky-700 mb-2">
+              Cada linha é uma caixa: digite a quantidade dela. A etiqueta sai com o QR e a quantidade escrita, e a caixa fica cadastrada no sistema (ao escanear na Saída, ela baixa essa quantidade e não deixa baixar duas vezes). Para várias caixas iguais use <b>3x50</b> (três caixas de 50).
+            </p>
+            <textarea
+              value={qrQtds}
+              onChange={(e) => setQrQtds(e.target.value)}
+              placeholder={'Quantidade de cada caixa, uma por linha. Ex:\n87\n90\n3x85'}
+              rows={4}
+              className="w-full text-sm border border-sky-200 rounded-lg px-3 py-2 bg-white outline-none focus:border-sky-400"
+            />
+            {!itemDoCodigo && (
+              <p className="text-[11px] text-amber-600 font-semibold mt-1">
+                Informe o código do item acima (digite, escolha na lista ou use o 📷) — o QR precisa saber de qual item é a caixa.
+              </p>
+            )}
+            {qtdsInvalidas.length > 0 && (
+              <p className="text-[11px] text-red-600 font-semibold mt-1">Valor inválido: {qtdsInvalidas.join(', ')}</p>
+            )}
+            {qtdsCaixas.length > 0 && (
+              <p className="text-[11px] text-sky-700 font-semibold mt-1">
+                {qtdsCaixas.length} caixa(s) — total: {formatPesoBR(qtdsCaixas.reduce((a, b) => a + b, 0))} un.
+              </p>
+            )}
+          </div>
+        )}
 
         {multiAtivo && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-3">
@@ -693,7 +895,8 @@ export default function Etiquetas() {
             disabled={
               (selectedCount === 0 && !includeStatus) ||
               savingQueue ||
-              (multiAtivo && totalEtiquetasMulti === 0)
+              (multiAtivo && totalEtiquetasMulti === 0) ||
+              (qrAtivo && (qtdsCaixas.length === 0 || !itemDoCodigo))
             }
             className={`px-5 py-2.5 text-white rounded-lg text-sm font-bold transition disabled:bg-slate-200 disabled:text-slate-400 ${
               editingId ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'
@@ -703,6 +906,8 @@ export default function Etiquetas() {
               ? 'Salvando...'
               : editingId
               ? '✓ Salvar edição'
+              : qrAtivo
+              ? `+ Gerar ${qtdsCaixas.length || ''} etiqueta(s) com QR`
               : multiAtivo
               ? `+ Adicionar ${totalEtiquetasMulti || ''} etiqueta(s) à fila`
               : '+ Adicionar à fila de impressão'}
@@ -860,29 +1065,47 @@ function PrintEtiquetas({ queue, onClose }) {
         <div className="printable-sheet bg-white rounded-2xl print:rounded-none p-6 print:p-0">
           <div className="flex flex-wrap gap-4 print:gap-3">
             {queue.map(q => {
-              const campos = camposParaExibir(q.fields);
+              const todos = camposParaExibir(q.fields);
+              // Etiqueta de caixa: o QR sai num quadrado à direita; o resto do texto à esquerda.
+              const qrField = todos.find(f => f.key === 'qr' && f.value);
+              const campos = qrField ? todos.filter(f => f.key !== 'qr') : todos;
               return (
               <div
                 key={q.id}
                 style={{ width: '14cm', height: '6cm' }}
                 className="border-2 border-slate-800 rounded-md p-3 flex flex-col justify-between break-inside-avoid print:break-inside-avoid"
               >
-                <div className={`flex-1 flex flex-col overflow-hidden ${
-                  campos.length > 1 ? 'justify-evenly' : 'justify-center'
+                <div className={`flex-1 overflow-hidden ${qrField ? 'flex flex-row items-center gap-3' : 'flex flex-col'} ${
+                  qrField ? '' : campos.length > 1 ? 'justify-evenly' : 'justify-center'
                 }`}>
-                  {campos.length > 0 ? campos.map(f => f.key === 'codigo' ? (
-                    <div key={f.key} className="flex justify-start">
-                      <Barcode value={f.value} height={campos.length > 4 ? 30 : 42} />
+                  <div className={`${qrField ? 'flex-1 min-w-0 flex flex-col' : 'contents'} ${
+                    qrField ? (campos.length > 1 ? 'justify-evenly h-full' : 'justify-center h-full') : ''
+                  }`}>
+                    {campos.length > 0 ? campos.map(f => (f.key === 'codigo' && !qrField) ? (
+                      <div key={f.key} className="flex justify-start">
+                        <Barcode value={f.value} height={campos.length > 4 ? 30 : 42} />
+                      </div>
+                    ) : f.key === 'qtd' && qrField ? (
+                      <p key={f.key} className="text-3xl font-bold leading-tight text-slate-900">
+                        {f.label.toUpperCase()}: {f.value}
+                      </p>
+                    ) : (
+                      <p key={f.key} className={`${qrField ? fieldTextSizeClass(Math.max(campos.length, 4)) : fieldTextSizeClass(campos.length)} leading-snug`}>
+                        <span className="font-bold text-slate-800">{f.label.toUpperCase()}:</span>{' '}
+                        <span className="text-slate-700">
+                          {f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '')}
+                        </span>
+                      </p>
+                    )) : (
+                      <p className="text-xs text-slate-300">—</p>
+                    )}
+                  </div>
+
+                  {qrField && (
+                    <div className="shrink-0 flex flex-col items-center">
+                      <QrCode value={`CX:${qrField.value}`} size="3.6cm" />
+                      <span className="font-mono text-[10px] tracking-widest text-slate-700 leading-none">CX {qrField.value}</span>
                     </div>
-                  ) : (
-                    <p key={f.key} className={`${fieldTextSizeClass(campos.length)} leading-snug`}>
-                      <span className="font-bold text-slate-800">{f.label.toUpperCase()}:</span>{' '}
-                      <span className="text-slate-700">
-                        {f.type === 'date' && f.value ? fmtDate(f.value) : (f.value || '')}
-                      </span>
-                    </p>
-                  )) : (
-                    <p className="text-xs text-slate-300">—</p>
                   )}
                 </div>
 
