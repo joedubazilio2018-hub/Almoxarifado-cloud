@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { PrintCheckbox, fmtDate } from './printUtils';
+import Barcode from './Barcode';
 
 /* ─────────────────────────────────────────────
    SUPABASE CONFIG (mesmo projeto do page.js / Reformas.jsx)
@@ -26,6 +27,11 @@ async function db(path, opts = {}) {
   const data = await res.text();
   return data ? JSON.parse(data) : [];
 }
+
+// Itens do estoque (só id + nome): usados pra sugerir o código de barras na etiqueta.
+const itemsApi = {
+  getItems: () => db('items?select=id,name&order=name'),
+};
 
 const reformasApi = {
   // Só os campos que interessam aqui: nº da reforma, cliente e status (pra identificar na lista)
@@ -57,6 +63,7 @@ const STATUS_LABEL = {
    vinculados a um registro real da tabela reformas (só leitura). */
 const FIELD_DEFS = [
   { key: 'item',    label: 'Item / Descrição', type: 'text' },
+  { key: 'codigo',  label: 'Cód. de barras',   type: 'text' },
   { key: 'medida',  label: 'Medida',           type: 'text' },
   { key: 'nf',      label: 'Nº NF',            type: 'text' },
   { key: 'data',    label: 'Data',             type: 'date' },
@@ -153,6 +160,12 @@ export default function Etiquetas() {
   const [loadingReformas, setLoadingReformas]   = useState(true);
   const [reformasError, setReformasError]       = useState(false);
   const [selectedReformaId, setSelectedReformaId] = useState('');
+
+  // Itens do estoque, pra sugerir o código de barras (o código é o id do item).
+  const [itensEstoque, setItensEstoque] = useState([]);
+  useEffect(() => {
+    itemsApi.getItems().then(setItensEstoque).catch(() => {}); // sem lista, dá pra digitar o código na mão
+  }, []);
 
   useEffect(() => {
     reformasApi.getReformas()
@@ -521,6 +534,7 @@ export default function Etiquetas() {
                 ) : null}
                 <input
                   type={f.type}
+                  list={f.key === 'codigo' ? 'itens-codigo' : undefined}
                   value={values[f.key]}
                   onChange={(e) => setValue(f.key, e.target.value)}
                   disabled={!included[f.key] || (isPeso && multiAtivo) || (isMedida && multiAtivo)}
@@ -802,6 +816,10 @@ export default function Etiquetas() {
         </button>
       </div>
 
+      <datalist id="itens-codigo">
+        {itensEstoque.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+      </datalist>
+
       {showPrint && <PrintEtiquetas queue={queue} onClose={() => setShowPrint(false)} />}
     </div>
   );
@@ -852,7 +870,11 @@ function PrintEtiquetas({ queue, onClose }) {
                 <div className={`flex-1 flex flex-col overflow-hidden ${
                   campos.length > 1 ? 'justify-evenly' : 'justify-center'
                 }`}>
-                  {campos.length > 0 ? campos.map(f => (
+                  {campos.length > 0 ? campos.map(f => f.key === 'codigo' ? (
+                    <div key={f.key} className="flex justify-start">
+                      <Barcode value={f.value} height={campos.length > 4 ? 30 : 42} />
+                    </div>
+                  ) : (
                     <p key={f.key} className={`${fieldTextSizeClass(campos.length)} leading-snug`}>
                       <span className="font-bold text-slate-800">{f.label.toUpperCase()}:</span>{' '}
                       <span className="text-slate-700">
