@@ -63,6 +63,19 @@ const api = {
   // Insere várias linhas de saída (um lote/lançamento) em uma única requisição HTTP
   insertOutboundBatch: (rows) => db('outbound_log', { method: 'POST', body: JSON.stringify(rows) }),
 
+  // CAIXAS (QR por caixa: cada caixa tem id curto, item, quantidade e status)
+  getCaixa: (id) => db(`caixas?id=eq.${encodeURIComponent(id)}`),
+  // "Reserva" as caixas: só muda as que ainda estão disponíveis. Devolve as que conseguiu reservar,
+  // então se outro aparelho já baixou uma delas, ela não volta na lista (evita baixa dupla).
+  claimCaixas: (ids, por, loteId) => db(`caixas?id=in.(${ids.map(encodeURIComponent).join(',')})&status=eq.disponivel`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'baixada', baixada_em: new Date().toISOString(), baixada_por: por, lote_id: loteId }),
+  }),
+  releaseCaixas: (ids) => db(`caixas?id=in.(${ids.map(encodeURIComponent).join(',')})`, {
+    method: 'PATCH', prefer: '',
+    body: JSON.stringify({ status: 'disponivel', baixada_em: null, baixada_por: null, lote_id: null }),
+  }),
+
   // SC MAP
   getScMap:   () => db('sc_map'),
   upsertSc:   (row) => db('sc_map', { method: 'POST', prefer: 'resolution=merge-duplicates,return=representation', body: JSON.stringify(row) }),
@@ -328,6 +341,8 @@ export default function InventoryApp() {
     items: [{ itemId: '', qty: '' }],
   });
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanContinuo, setScanContinuo] = useState(false); // manter a câmera aberta lendo caixa após caixa
+  const [scanFeedback, setScanFeedback] = useState('');
   const [receivingSc, setReceivingSc] = useState(null);
   const [receiveQty,  setReceiveQty]  = useState('');
   const [newSc, setNewSc] = useState({ itemId: '', sc: '', qty: '', dateSc: today(), dateEta: '' });
@@ -611,16 +626,63 @@ export default function InventoryApp() {
     return getQty(itemId) - usedElsewhere;
   }, [newOutbound.items, getQty]);
 
-  // Código lido pela câmera = id do item. Coloca o item no lote e já foca na quantidade.
+  // Lê o QR de uma caixa: consulta a caixa no sistema e põe item + quantidade no lote.
+  const handleScanCaixa = async (cid) => {
+    const feedback = (msg, tipo) => {
+      setScanFeedback(msg);
+      showToast(msg, tipo);
+    };
+    if (newOutbound.items.some(r => r.caixaId === cid)) return feedback(`A caixa ${cid} já está no lote.`, 'error');
+
+    let cx;
+    try {
+      const r = await api.getCaixa(cid);
+      cx = r[0];
+    } catch (err) {
+      const msg = String(err?.message || '');
+      if (/caixas/i.test(msg) && /(relation|does not exist|schema cache|404)/i.test(msg)) {
+        return feedback('A tabela "caixas" ainda não existe no Supabase (rode o SQL do caixas.txt).', 'error');
+      }
+      return feedback('Não consegui consultar a caixa. Verifique a conexão.', 'error');
+    }
+    if (!cx) return feedback(`Caixa ${cid} não encontrada no sistema.`, 'error');
+    if (cx.status !== 'disponivel') {
+      const quando = cx.baixada_em ? new Date(cx.baixada_em).toLocaleDateString('pt-BR') : '';
+      return feedback(`Caixa ${cid} já foi baixada${cx.baixada_por ? ` por ${cx.baixada_por}` : ''}${quando ? ` em ${quando}` : ''}.`, 'error');
+    }
+    const item = items.find(i => i.id === cx.item_id);
+    if (!item) return feedback(`O item da caixa ${cid} (${cx.item_id}) não existe mais no estoque.`, 'error');
+
+    setNewOutbound(prev => {
+      if (prev.items.some(r => r.caixaId === cid)) return prev;
+      const novaLinha = { itemId: item.id, qty: String(cx.qty), caixaId: cid };
+      const vazio = prev.items.findIndex(r => !r.itemId && !r.qty);
+      if (vazio >= 0) return { ...prev, items: prev.items.map((r, i) => i === vazio ? novaLinha : r) };
+      return { ...prev, items: [...prev.items, novaLinha] };
+    });
+    feedback(`✓ Caixa ${cid}: ${item.name} — ${cx.qty} ${item.unit || 'un.'}`);
+  };
+
+  // Código lido pela câmera. "CX:..." = QR de caixa; qualquer outro = id do item (código de barras).
   const handleScanOutbound = (raw) => {
-    setScannerOpen(false);
     const code = String(raw || '').trim();
+    if (!scanContinuo) setScannerOpen(false);
+
+    if (/^CX:/i.test(code)) {
+      handleScanCaixa(code.slice(3).trim().toUpperCase());
+      return;
+    }
+
     const item = items.find(i => i.id === code) || items.find(i => i.id.toLowerCase() === code.toLowerCase());
-    if (!item) return showToast(`Código "${code}" não encontrado no estoque.`, 'error');
+    if (!item) {
+      setScanFeedback(`Código "${code}" não encontrado no estoque.`);
+      return showToast(`Código "${code}" não encontrado no estoque.`, 'error');
+    }
 
-    const focarQtd = () => setTimeout(() => document.getElementById(`out-qty-${item.id}`)?.focus(), 150);
+    const focarQtd = () => { if (!scanContinuo) setTimeout(() => document.getElementById(`out-qty-${item.id}`)?.focus(), 150); };
 
-    if (newOutbound.items.some(r => r.itemId === item.id)) {
+    if (newOutbound.items.some(r => r.itemId === item.id && !r.caixaId)) {
+      setScanFeedback(`"${item.name}" já está no lote.`);
       showToast(`"${item.name}" já está no lote — ajuste a quantidade.`, 'error');
       focarQtd();
       return;
@@ -630,6 +692,7 @@ export default function InventoryApp() {
       if (vazio >= 0) return { ...prev, items: prev.items.map((r, i) => i === vazio ? { ...r, itemId: item.id } : r) };
       return { ...prev, items: [...prev.items, { itemId: item.id, qty: '' }] };
     });
+    setScanFeedback(`Lido: ${item.name} (digite a quantidade depois)`);
     showToast(`Lido: ${item.name}`);
     focarQtd();
   };
@@ -657,8 +720,24 @@ export default function InventoryApp() {
     }
 
     setSaving(true);
+    let caixasReservadas = [];
     try {
       const loteId = `LOTE-${Date.now()}`;
+
+      // Caixas com QR: primeiro "reserva" (marca como baixada só se ainda estiver disponível).
+      // Se outro aparelho baixou alguma nesse meio tempo, desfaz tudo e avisa — nada de baixa dupla.
+      const idsCaixas = validRows.filter(r => r.caixaId).map(r => r.caixaId);
+      if (idsCaixas.length > 0) {
+        caixasReservadas = (await api.claimCaixas(idsCaixas, newOutbound.retiradoPor.trim(), loteId)).map(c => c.id);
+        if (caixasReservadas.length !== idsCaixas.length) {
+          const faltando = idsCaixas.filter(id => !caixasReservadas.includes(id));
+          if (caixasReservadas.length > 0) await api.releaseCaixas(caixasReservadas);
+          caixasReservadas = [];
+          setSaving(false);
+          return showToast(`Caixa já baixada por outra pessoa: ${faltando.join(', ')}. Nada foi registrado — remova-a do lote e confirme de novo.`, 'error');
+        }
+      }
+
       const rows = validRows.map((row, idx) => ({
         id: `OUT-${Date.now()}-${idx}`,
         item_id: row.itemId,
@@ -667,12 +746,17 @@ export default function InventoryApp() {
         notes: newOutbound.notes,
         retirado_por: newOutbound.retiradoPor.trim(),
         lote_id: loteId,
+        ...(row.caixaId ? { notes: [newOutbound.notes, `Caixa ${row.caixaId}`].filter(Boolean).join(' · ') } : {}),
       }));
       await api.insertOutboundBatch(rows);
       setOutboundLog(prev => [...prev, ...rows.map(rowToOutbound)]);
       setNewOutbound({ date: today(), retiradoPor: '', notes: '', items: [{ itemId: '', qty: '' }] });
       showToast(`Saída registrada: ${rows.length} ${rows.length === 1 ? 'item' : 'itens'}!`);
-    } catch { showToast('Erro ao registrar saída.', 'error'); }
+    } catch {
+      // Falhou depois de reservar as caixas: devolve elas pra "disponível" (senão ficariam perdidas)
+      if (caixasReservadas.length > 0) { try { await api.releaseCaixas(caixasReservadas); } catch {} }
+      showToast('Erro ao registrar saída.', 'error');
+    }
     finally { setSaving(false); }
   };
 
@@ -1676,15 +1760,31 @@ export default function InventoryApp() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <p className="text-xs font-bold text-slate-500 uppercase">Itens</p>
-                        <button type="button" onClick={() => setScannerOpen(true)}
+                        <button type="button" onClick={() => { setScanFeedback(''); setScannerOpen(true); }}
                           className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold rounded-lg transition">
-                          📷 Escanear item
+                          📷 Escanear item / caixa
                         </button>
                       </div>
+                      <label className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 cursor-pointer">
+                        <input type="checkbox" checked={scanContinuo} onChange={e => setScanContinuo(e.target.checked)}
+                          className="w-4 h-4 accent-rose-600" />
+                        Ler vários seguidos (câmera fica aberta — bom pra várias caixas)
+                      </label>
                       {newOutbound.items.map((row, idx) => {
                         const available = getAvailableForRow(row.itemId, idx);
                         return (
                           <div key={idx} className="flex gap-2 items-start bg-slate-50 border border-slate-200 rounded-xl p-3">
+                            {row.caixaId ? (
+                              <div className="flex-1">
+                                <p className="text-sm font-bold text-slate-800">{items.find(i => i.id === row.itemId)?.name || row.itemId}</p>
+                                <p className="text-xs font-semibold text-sky-700 mt-0.5">
+                                  📦 Caixa {row.caixaId} — {row.qty} {items.find(i => i.id === row.itemId)?.unit || 'un.'}
+                                  {available !== null && (
+                                    <span className={`ml-2 font-bold ${available < 0 ? 'text-red-500' : 'text-slate-400'}`}>disp. {available}</span>
+                                  )}
+                                </p>
+                              </div>
+                            ) : (
                             <div className="flex-1 space-y-2">
                               <ItemSearchSelect items={items} value={row.itemId}
                                 onChange={v => updateOutboundRow(idx, 'itemId', v)}
@@ -1699,7 +1799,8 @@ export default function InventoryApp() {
                                 )}
                               </div>
                             </div>
-                            {newOutbound.items.length > 1 && (
+                            )}
+                            {(newOutbound.items.length > 1 || row.caixaId) && (
                               <button type="button" onClick={() => removeOutboundRow(idx)}
                                 className="mt-1 px-2 py-1 text-xs text-slate-400 hover:text-red-500 font-bold transition">✕</button>
                             )}
@@ -1719,7 +1820,15 @@ export default function InventoryApp() {
                     </Field>
                     <SubmitBtn color="rose" disabled={saving}>{saving ? 'Salvando...' : 'Confirmar Baixa no Estoque'}</SubmitBtn>
                   </form>
-                  {scannerOpen && <BarcodeScanner onScan={handleScanOutbound} onClose={() => setScannerOpen(false)} />}
+                  {scannerOpen && (
+                    <BarcodeScanner
+                      continuous={scanContinuo}
+                      feedback={scanFeedback}
+                      title="📷 Aponte para o código de barras ou QR da caixa"
+                      onScan={handleScanOutbound}
+                      onClose={() => setScannerOpen(false)}
+                    />
+                  )}
                 </div>
               )}
 
