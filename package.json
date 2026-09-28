@@ -15,7 +15,8 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "html5-qrcode": "^2.3.8",
-    "jsbarcode": "^3.11.6"
+    "jsbarcode": "^3.11.6",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.19",
