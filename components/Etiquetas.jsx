@@ -374,11 +374,11 @@ export default function Etiquetas() {
           // a fila falhou: apaga as caixas recém-criadas pra não sobrar caixa sem etiqueta
           try { await caixasApi.deleteIds(caixas.map(c => c.id)); } catch {}
         }
-        const msg = String(e?.message || '');
+        const msg = String(e?.message || e || '');
         if (/caixas/i.test(msg) && /(relation|does not exist|schema cache|404)/i.test(msg)) {
           alert('A tabela "caixas" ainda não existe no Supabase. Rode o SQL do arquivo caixas.txt no SQL Editor e tente de novo.');
         } else {
-          alert('Não foi possível gerar as etiquetas agora. Nenhuma foi adicionada. Verifique sua conexão e tente de novo.');
+          alert(`Não foi possível gerar as etiquetas. Nenhuma foi adicionada.\n\nEtapa que falhou: ${caixasCriadas ? 'enviar as etiquetas para a fila' : 'criar as caixas no sistema'}\nDetalhe: ${msg.slice(0, 400)}`);
         }
       } finally {
         setSavingQueue(false);
