@@ -341,6 +341,7 @@ export default function InventoryApp() {
     items: [{ itemId: '', qty: '' }],
   });
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerInOpen, setScannerInOpen] = useState(false); // leitor da tela de Entrada
   const [scanContinuo, setScanContinuo] = useState(false); // manter a câmera aberta lendo caixa após caixa
   const [scanFeedback, setScanFeedback] = useState('');
   const [receivingSc, setReceivingSc] = useState(null);
@@ -601,6 +602,22 @@ export default function InventoryApp() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Código lido na ENTRADA: acha o item pelo código de barras e já seleciona; depois foca na quantidade.
+  const handleScanInbound = (raw) => {
+    const code = String(raw || '').trim();
+    setScannerInOpen(false);
+
+    if (/^CX:/i.test(code)) {
+      return showToast('Esse é o QR de uma caixa (usado na Saída). Escaneie o código de barras do item.', 'error');
+    }
+    const item = items.find(i => i.id === code) || items.find(i => i.id.toLowerCase() === code.toLowerCase());
+    if (!item) return showToast(`Código "${code}" não encontrado no estoque.`, 'error');
+
+    setNewInbound(prev => ({ ...prev, itemId: item.id }));
+    showToast(`Lido: ${item.name}`);
+    setTimeout(() => document.getElementById('in-qty')?.focus(), 150);
   };
 
   /* ── Lote de saída: linhas de item dinâmicas ── */
@@ -1714,14 +1731,21 @@ export default function InventoryApp() {
                     <p className="text-slate-400 text-xs mt-0.5">Vincule a movimentação a uma Solicitação de Compra (SC)</p>
                   </div>
                   <form onSubmit={handleInbound} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-                    <Field label="Selecionar Item">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-500 uppercase">Item</p>
+                        <button type="button" onClick={() => setScannerInOpen(true)}
+                          className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">
+                          📷 Escanear item
+                        </button>
+                      </div>
                       <ItemSearchSelect items={items} value={newInbound.itemId}
                         onChange={v => setNewInbound({ ...newInbound, itemId: v })}
                         getQty={getQty} showStock={false} ringColor="emerald" />
-                    </Field>
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
                       <Field label="Quantidade Recebida">
-                        <Input ringColor="emerald" type="number" required min="1" placeholder="0"
+                        <Input ringColor="emerald" type="number" required min="1" placeholder="0" id="in-qty"
                           value={newInbound.qty} onChange={e => setNewInbound({ ...newInbound, qty: e.target.value })} />
                       </Field>
                       <Field label="Nº da SC">
@@ -1735,6 +1759,13 @@ export default function InventoryApp() {
                     </Field>
                     <SubmitBtn color="emerald" disabled={saving}>{saving ? 'Salvando...' : 'Confirmar Entrada de Material'}</SubmitBtn>
                   </form>
+                  {scannerInOpen && (
+                    <BarcodeScanner
+                      title="📷 Aponte para o código de barras do item"
+                      onScan={handleScanInbound}
+                      onClose={() => setScannerInOpen(false)}
+                    />
+                  )}
                 </div>
               )}
 
